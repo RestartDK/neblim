@@ -1,23 +1,32 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState, type RefObject } from "react";
 
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 
-import type { HealthState } from "@/hooks/use-health"
-import type { PoseStreamState } from "@/hooks/use-pose-stream"
-import { PoseCanvas } from "./pose-canvas"
+import type { HealthState } from "@/hooks/use-health";
+import type { PoseStreamState } from "@/hooks/use-pose-stream";
+import { PoseCanvas } from "./pose-canvas";
 
 interface StatItem {
-  label: string
-  value: string
-  color?: "green" | "default"
+  label: string;
+  value: string;
+  color?: "green" | "default";
 }
 
 function StatBlock({ stats }: { stats: StatItem[] }) {
   return (
     <div className="space-y-1">
       {stats.map((s) => (
-        <div key={s.label} className="flex items-center justify-between text-xs">
+        <div
+          key={s.label}
+          className="flex items-center justify-between text-xs"
+        >
           <span className="text-muted-foreground">{s.label}</span>
           <span
             className={
@@ -31,40 +40,44 @@ function StatBlock({ stats }: { stats: StatItem[] }) {
         </div>
       ))}
     </div>
-  )
+  );
 }
 
 interface LiveFeedProps {
-  poseStream: PoseStreamState
-  health: HealthState
+  poseStream: PoseStreamState;
+  health: HealthState;
+  meshCanvasRef: RefObject<HTMLCanvasElement | null>;
 }
 
 const formatRelativeTime = (timestamp: string | null, now: number): string => {
   if (!timestamp) {
-    return "No updates"
+    return "No updates";
   }
 
-  const deltaSeconds = Math.max(0, Math.floor((now - new Date(timestamp).getTime()) / 1000))
-  if (deltaSeconds < 2) return "Now"
-  if (deltaSeconds < 60) return `${deltaSeconds}s ago`
-  return `${Math.floor(deltaSeconds / 60)}m ago`
-}
+  const deltaSeconds = Math.max(
+    0,
+    Math.floor((now - new Date(timestamp).getTime()) / 1000),
+  );
+  if (deltaSeconds < 2) return "Now";
+  if (deltaSeconds < 60) return `${deltaSeconds}s ago`;
+  return `${Math.floor(deltaSeconds / 60)}m ago`;
+};
 
-export function LiveFeed({ poseStream, health }: LiveFeedProps) {
-  const [now, setNow] = useState(() => Date.now())
+export function LiveFeed({ poseStream, health, meshCanvasRef }: LiveFeedProps) {
+  const [now, setNow] = useState(() => Date.now());
 
   useEffect(() => {
     const interval = window.setInterval(() => {
-      setNow(Date.now())
-    }, 1000)
+      setNow(Date.now());
+    }, 1000);
 
     return () => {
-      window.clearInterval(interval)
-    }
-  }, [])
+      window.clearInterval(interval);
+    };
+  }, []);
 
   const bodyStats = useMemo<StatItem[]>(() => {
-    const gaitIsHealthy = poseStream.stats.gait === "Normal"
+    const gaitIsHealthy = poseStream.stats.gait === "Normal";
     return [
       {
         label: "Posture",
@@ -80,21 +93,31 @@ export function LiveFeed({ poseStream, health }: LiveFeedProps) {
         label: "Movement",
         value: poseStream.stats.movement,
       },
-    ]
-  }, [poseStream.stats.gait, poseStream.stats.movement, poseStream.stats.posture])
+    ];
+  }, [
+    poseStream.stats.gait,
+    poseStream.stats.movement,
+    poseStream.stats.posture,
+  ]);
 
   const signalStats = useMemo<StatItem[]>(
     () => [
-      { label: "Signal Strength", value: `${poseStream.stats.signalStrength}dBm` },
-      { label: "Tracking Points", value: String(poseStream.stats.trackingPoints) },
+      {
+        label: "Signal Strength",
+        value: `${poseStream.stats.signalStrength}dBm`,
+      },
+      {
+        label: "Tracking Points",
+        value: String(poseStream.stats.trackingPoints),
+      },
       { label: "Latency", value: `${poseStream.stats.latency}ms` },
     ],
     [
       poseStream.stats.latency,
       poseStream.stats.signalStrength,
       poseStream.stats.trackingPoints,
-    ]
-  )
+    ],
+  );
 
   const activityStats = useMemo<StatItem[]>(
     () => [
@@ -111,8 +134,13 @@ export function LiveFeed({ poseStream, health }: LiveFeedProps) {
         value: poseStream.stats.stepsToday.toLocaleString(),
       },
     ],
-    [now, poseStream.lastUpdate, poseStream.stats.roomDuration, poseStream.stats.stepsToday]
-  )
+    [
+      now,
+      poseStream.lastUpdate,
+      poseStream.stats.roomDuration,
+      poseStream.stats.stepsToday,
+    ],
+  );
 
   const healthLabel = health.isLoading
     ? "Checking"
@@ -120,7 +148,7 @@ export function LiveFeed({ poseStream, health }: LiveFeedProps) {
       ? "Healthy"
       : health.status === "degraded"
         ? "Degraded"
-        : "Unhealthy"
+        : "Unhealthy";
 
   return (
     <Card className="flex h-full flex-col">
@@ -145,7 +173,7 @@ export function LiveFeed({ poseStream, health }: LiveFeedProps) {
 
       <CardContent className="flex flex-1 flex-col gap-3 pb-4">
         <div className="relative flex-1 min-h-[300px] rounded-lg border bg-background/50 overflow-hidden">
-          <PoseCanvas persons={poseStream.persons} />
+          <PoseCanvas ref={meshCanvasRef} persons={poseStream.persons} />
         </div>
 
         <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
@@ -161,5 +189,5 @@ export function LiveFeed({ poseStream, health }: LiveFeedProps) {
         </div>
       </CardContent>
     </Card>
-  )
+  );
 }
