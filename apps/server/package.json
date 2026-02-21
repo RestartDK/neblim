@@ -1,0 +1,16 @@
+{
+  "name": "server",
+  "scripts": {
+    "dev": "bun run --hot src/index.ts"
+  },
+  "dependencies": {
+    "@ai-sdk/google": "^3.0.30",
+    "ai": "^6.0.97",
+    "hono": "^4.12.1",
+    "typescript": "^5.9.3",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  }
+}

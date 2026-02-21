@@ -1,58 +1,62 @@
-import { useEffect, useState } from "react"
-import { DashboardHeader } from "./header"
-import { LiveFeed } from "./live-feed"
-import { AgentStatusFeed } from "./agent-status-feed"
-import { VoiceAgentCalls } from "./voice-agent-calls"
-import type { DemoUser } from "./user-menu"
-import { BackendProvider } from "@/hooks/use-backend-detector"
-import { useHealth } from "@/hooks/use-health"
-import { usePoseStream } from "@/hooks/use-pose-stream"
-import { useActivityEvents } from "@/hooks/use-activity-events"
+import { useEffect, useRef, useState } from "react";
+import { DashboardHeader } from "./header";
+import { LiveFeed } from "./live-feed";
+import { AgentStatusFeed } from "./agent-status-feed";
+import { VoiceAgentCalls } from "./voice-agent-calls";
+import type { DemoUser } from "./user-menu";
+import { BackendProvider } from "@/hooks/use-backend-detector";
+import { useHealth } from "@/hooks/use-health";
+import { usePoseStream } from "@/hooks/use-pose-stream";
+import { useMeshMonitorAgent } from "@/hooks/use-mesh-monitor-agent";
 
 function DashboardContent() {
-  const poseStream = usePoseStream()
-  const health = useHealth()
-  const [demoUser, setDemoUser] = useState<DemoUser | null>(null)
+  const poseStream = usePoseStream();
+  const health = useHealth();
+  const [demoUser, setDemoUser] = useState<DemoUser | null>(null);
+  const meshCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   useEffect(() => {
-    let cancelled = false
+    let cancelled = false;
 
     if (!poseStream.isDemo) {
-      setDemoUser(null)
-      return
+      setDemoUser(null);
+      return;
     }
 
     const loadDemoUser = async () => {
       try {
-        const response = await fetch("/demo-user.json")
+        const response = await fetch("/demo-user.json");
         if (!response.ok) {
-          throw new Error("Failed to load demo user")
+          throw new Error("Failed to load demo user");
         }
 
-        const user = (await response.json()) as DemoUser
+        const user = (await response.json()) as DemoUser;
 
         if (!cancelled) {
-          setDemoUser(user)
+          setDemoUser(user);
         }
       } catch {
         if (!cancelled) {
-          setDemoUser(null)
+          setDemoUser(null);
         }
       }
-    }
+    };
 
-    void loadDemoUser()
+    void loadDemoUser();
 
     return () => {
-      cancelled = true
-    }
-  }, [poseStream.isDemo])
+      cancelled = true;
+    };
+  }, [poseStream.isDemo]);
 
-  const events = useActivityEvents({
+  const events = useMeshMonitorAgent({
+    canvasRef: meshCanvasRef,
     persons: poseStream.persons,
-    healthStatus: health.status,
+    frameId: poseStream.frameId,
+    timestamp: poseStream.lastUpdate,
+    poseStats: poseStream.stats,
     isDemo: poseStream.isDemo,
-  })
+  });
 
   return (
     <div className="flex h-screen flex-col bg-background">
@@ -65,7 +69,11 @@ function DashboardContent() {
       <main className="flex-1 overflow-auto p-4">
         <div className="mx-auto grid h-full max-w-[1600px] grid-cols-1 gap-4 lg:grid-cols-2 lg:grid-rows-[1fr_auto]">
           <div className="lg:row-span-2 min-h-[500px]">
-            <LiveFeed poseStream={poseStream} health={health} />
+            <LiveFeed
+              poseStream={poseStream}
+              health={health}
+              meshCanvasRef={meshCanvasRef}
+            />
           </div>
 
           <div className="min-h-[300px]">
@@ -78,7 +86,7 @@ function DashboardContent() {
         </div>
       </main>
     </div>
-  )
+  );
 }
 
 export function Dashboard() {
@@ -86,5 +94,5 @@ export function Dashboard() {
     <BackendProvider>
       <DashboardContent />
     </BackendProvider>
-  )
+  );
 }
