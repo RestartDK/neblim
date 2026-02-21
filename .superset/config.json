@@ -1,4 +1,6 @@
 {
-  "setup": [],
+  "setup": [
+    "bun install\ncp \\\"$SUPERSET_ROOT_PATH/.env\\\" .env\""
+  ],
   "teardown": []
 }
