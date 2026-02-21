@@ -24,3 +24,19 @@ dist-ssr
 *.sw?
 
 .env
+
+# Turborepo / Workspaces
+.turbo
+coverage
+
+# Next.js / Vercel
+.next/
+.vercel
+out/
+
+# pnpm
+.pnp
+.pnp.js
+
+# Certs / keys
+*.pem
