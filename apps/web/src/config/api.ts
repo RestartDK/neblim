@@ -4,6 +4,7 @@ const DEFAULT_API_BASE_URL = "http://localhost:8000";
 const DEFAULT_WS_BASE_URL = "ws://localhost:8000";
 const DEFAULT_POSE3D_API_BASE_URL = "http://127.0.0.1:8787";
 const DEFAULT_POSE3D_WS_BASE_URL = "ws://127.0.0.1:8787";
+const DEFAULT_AI_SERVER_BASE_URL = "http://localhost:8001";
 
 export const BASE_URL = stripTrailingSlash(
   import.meta.env.VITE_API_BASE_URL ?? DEFAULT_API_BASE_URL,
@@ -19,6 +20,10 @@ export const POSE3D_BASE_URL = stripTrailingSlash(
 
 export const POSE3D_WS_URL = stripTrailingSlash(
   import.meta.env.VITE_POSE3D_WS_BASE_URL ?? DEFAULT_POSE3D_WS_BASE_URL,
+);
+
+export const AI_SERVER_BASE_URL = stripTrailingSlash(
+  import.meta.env.VITE_AI_SERVER_BASE_URL ?? DEFAULT_AI_SERVER_BASE_URL,
 );
 
 export const API_ENDPOINTS = {
@@ -79,4 +84,12 @@ export const buildPose3dWsUrl = (path: string): string => {
   }
 
   return `${POSE3D_WS_URL}${path.startsWith("/") ? path : `/${path}`}`;
+};
+
+export const buildAiServerUrl = (path: string): string => {
+  if (path.startsWith("http://") || path.startsWith("https://")) {
+    return path;
+  }
+
+  return `${AI_SERVER_BASE_URL}${path.startsWith("/") ? path : `/${path}`}`;
 };

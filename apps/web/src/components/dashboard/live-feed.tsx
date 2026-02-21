@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type RefObject } from "react";
 
 import {
   Card,
@@ -49,6 +49,7 @@ function StatBlock({ stats }: { stats: StatItem[] }) {
 interface LiveFeedProps {
   poseStream: PoseStreamState;
   health: HealthState;
+  meshCanvasRef: RefObject<HTMLCanvasElement | null>;
 }
 
 type ViewMode = "2d" | "3d";
@@ -67,22 +68,13 @@ const formatRelativeTime = (timestamp: string | null, now: number): string => {
   return `${Math.floor(deltaSeconds / 60)}m ago`;
 };
 
-export function LiveFeed({ poseStream, health }: LiveFeedProps) {
+export function LiveFeed({ poseStream, health, meshCanvasRef }: LiveFeedProps) {
   const [now, setNow] = useState(() => Date.now());
-  const [viewMode, setViewMode] = useState<ViewMode>("2d");
+  const [viewMode, setViewMode] = useState<ViewMode>("3d");
   const [isSeeding, setIsSeeding] = useState(false);
   const pose3d = usePose3dStream();
 
   const showPose3d = viewMode === "3d" && pose3d.isAvailable;
-
-  const seedPose3dDemo = useCallback(async () => {
-    setIsSeeding(true);
-    try {
-      await pose3d.seedDemo(3);
-    } finally {
-      setIsSeeding(false);
-    }
-  }, [pose3d]);
 
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -175,6 +167,15 @@ export function LiveFeed({ poseStream, health }: LiveFeedProps) {
       )}`
     : "offline";
 
+  const seedPose3dDemo = async () => {
+    setIsSeeding(true);
+    try {
+      await pose3d.seedDemo(3);
+    } finally {
+      setIsSeeding(false);
+    }
+  };
+
   return (
     <Card className="flex h-full flex-col">
       <CardHeader>
@@ -240,7 +241,10 @@ export function LiveFeed({ poseStream, health }: LiveFeedProps) {
 
         <div className="relative flex-1 min-h-[300px] rounded-lg border bg-background/50 overflow-hidden">
           {showPose3d ? (
-            <Pose3DViewer persons={pose3d.persons3d} />
+            <Pose3DViewer
+              persons={pose3d.persons3d}
+              canvasRef={meshCanvasRef}
+            />
           ) : (
             <PoseCanvas persons={poseStream.persons} />
           )}

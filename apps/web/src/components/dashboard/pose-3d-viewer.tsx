@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, type RefObject } from "react";
 
 import { OrbitControls } from "@react-three/drei";
 import { Canvas } from "@react-three/fiber";
@@ -8,6 +8,7 @@ import type { Pose3dPerson } from "@/services/pose3d-service";
 
 interface Pose3DViewerProps {
   persons: Pose3dPerson[];
+  canvasRef?: RefObject<HTMLCanvasElement | null>;
 }
 
 interface MappedPosePoint {
@@ -20,7 +21,7 @@ interface MappedPosePoint {
 
 const FLOOR_OFFSET = 0.015;
 
-export function Pose3DViewer({ persons }: Pose3DViewerProps) {
+export function Pose3DViewer({ persons, canvasRef }: Pose3DViewerProps) {
   const mappedPersons = useMemo<MappedPosePoint[]>(
     () =>
       persons.map((person) => ({
@@ -74,11 +75,24 @@ export function Pose3DViewer({ persons }: Pose3DViewerProps) {
     ];
   }, [mappedPersons]);
 
+  useEffect(() => {
+    return () => {
+      if (canvasRef) {
+        canvasRef.current = null;
+      }
+    };
+  }, [canvasRef]);
+
   return (
     <div className="absolute inset-0 size-full">
       <Canvas
         camera={{ position: cameraPosition, fov: 42, near: 0.1, far: 200 }}
         dpr={[1, 2]}
+        onCreated={({ gl }) => {
+          if (canvasRef) {
+            canvasRef.current = gl.domElement;
+          }
+        }}
       >
         <ambientLight intensity={0.55} />
         <directionalLight position={[8, 14, 6]} intensity={1} />
