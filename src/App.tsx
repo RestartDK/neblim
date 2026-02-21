@@ -1,7 +1,15 @@
-import { ComponentExample } from "@/components/component-example";
+import { ThemeProvider } from "@/hooks/use-theme"
+import { TooltipProvider } from "@/components/ui/tooltip"
+import { Dashboard } from "@/components/dashboard"
 
 export function App() {
-return <ComponentExample />;
+  return (
+    <ThemeProvider>
+      <TooltipProvider>
+        <Dashboard />
+      </TooltipProvider>
+    </ThemeProvider>
+  )
 }
 
-export default App;
+export default App
