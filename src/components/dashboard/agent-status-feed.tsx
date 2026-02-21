@@ -1,60 +1,10 @@
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-
-type Severity = "critical" | "warning" | "ok"
-
-interface StatusEvent {
-  id: string
-  severity: Severity
-  title: string
-  description: string
-  action: string
-  time: string
-}
-
-const events: StatusEvent[] = [
-  {
-    id: "1",
-    severity: "critical",
-    title: "Fall Detected",
-    description:
-      "Sudden vertical drop in bathroom at 1:47 PM. No movement for 23s.",
-    action: "Voice call initiated, family alerted, EMS on standby",
-    time: "1:47 PM",
-  },
-  {
-    id: "2",
-    severity: "warning",
-    title: "Erratic Gait Pattern",
-    description:
-      "Unsteady walking detected in hallway. Deviation +38% from baseline.",
-    action: "Monitoring closely, family notified via text",
-    time: "12:15 PM",
-  },
-  {
-    id: "3",
-    severity: "ok",
-    title: "Morning Routine Completed",
-    description:
-      "Got out of bed at 7:42 AM. Moved to kitchen. Normal pattern.",
-    action: "None required",
-    time: "7:42 AM",
-  },
-  {
-    id: "4",
-    severity: "ok",
-    title: "Medication Time Confirmed",
-    description:
-      "Activity near medicine cabinet at 8:15 AM. Duration consistent.",
-    action: "Logged to daily report",
-    time: "8:15 AM",
-  },
-]
+import type { ActivityEvent, ActivitySeverity } from "@/hooks/use-activity-events"
 
 const severityConfig: Record<
-  Severity,
+  ActivitySeverity,
   {
     label: string
     dot: string
@@ -86,7 +36,11 @@ const severityConfig: Record<
   },
 }
 
-function StatusEventCard({ event }: { event: StatusEvent }) {
+interface AgentStatusFeedProps {
+  events: ActivityEvent[]
+}
+
+function StatusEventCard({ event }: { event: ActivityEvent }) {
   const cfg = severityConfig[event.severity]
 
   return (
@@ -118,7 +72,7 @@ function StatusEventCard({ event }: { event: StatusEvent }) {
   )
 }
 
-export function AgentStatusFeed() {
+export function AgentStatusFeed({ events }: AgentStatusFeedProps) {
   return (
     <Card className="flex h-full flex-col">
       <CardHeader>
@@ -128,20 +82,20 @@ export function AgentStatusFeed() {
         </CardDescription>
       </CardHeader>
 
-      <CardContent className="flex flex-1 flex-col gap-3 pb-0">
-        <ScrollArea className="flex-1 pr-2 -mr-2">
+      <CardContent className="flex min-h-0 flex-1 flex-col pb-3">
+        <ScrollArea className="min-h-0 flex-1 pr-2 -mr-2">
           <div className="space-y-2.5 pb-2">
-            {events.map((e) => (
-              <StatusEventCard key={e.id} event={e} />
-            ))}
+            {events.length === 0 ? (
+              <div className="rounded-lg border border-dashed p-4 text-center text-xs text-muted-foreground">
+                No activity events yet.
+              </div>
+            ) : (
+              events.map((event) => (
+                <StatusEventCard key={event.id} event={event} />
+              ))
+            )}
           </div>
         </ScrollArea>
-
-        <div className="border-t py-3">
-          <Button variant="ghost" className="w-full text-xs text-muted-foreground">
-            View Full History
-          </Button>
-        </div>
       </CardContent>
     </Card>
   )
