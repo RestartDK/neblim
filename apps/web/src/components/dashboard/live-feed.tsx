@@ -8,9 +8,12 @@ import {
   CardDescription,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 
 import type { HealthState } from "@/hooks/use-health";
+import { usePose3dStream } from "@/hooks/use-pose3d-stream";
 import type { PoseStreamState } from "@/hooks/use-pose-stream";
+import { Pose3DViewer } from "./pose-3d-viewer";
 import { PoseCanvas } from "./pose-canvas";
 
 interface StatItem {
@@ -49,6 +52,8 @@ interface LiveFeedProps {
   meshCanvasRef: RefObject<HTMLCanvasElement | null>;
 }
 
+type ViewMode = "2d" | "3d";
+
 const formatRelativeTime = (timestamp: string | null, now: number): string => {
   if (!timestamp) {
     return "No updates";
@@ -65,6 +70,11 @@ const formatRelativeTime = (timestamp: string | null, now: number): string => {
 
 export function LiveFeed({ poseStream, health, meshCanvasRef }: LiveFeedProps) {
   const [now, setNow] = useState(() => Date.now());
+  const [viewMode, setViewMode] = useState<ViewMode>("3d");
+  const [isSeeding, setIsSeeding] = useState(false);
+  const pose3d = usePose3dStream();
+
+  const showPose3d = viewMode === "3d" && pose3d.isAvailable;
 
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -150,6 +160,22 @@ export function LiveFeed({ poseStream, health, meshCanvasRef }: LiveFeedProps) {
         ? "Degraded"
         : "Unhealthy";
 
+  const pose3dStatusLabel = pose3d.isAvailable
+    ? `${pose3d.connectionState} • ${pose3d.fps} fps • ${formatRelativeTime(
+        pose3d.lastUpdate,
+        now,
+      )}`
+    : "offline";
+
+  const seedPose3dDemo = async () => {
+    setIsSeeding(true);
+    try {
+      await pose3d.seedDemo(3);
+    } finally {
+      setIsSeeding(false);
+    }
+  };
+
   return (
     <Card className="flex h-full flex-col">
       <CardHeader>
@@ -172,9 +198,65 @@ export function LiveFeed({ poseStream, health, meshCanvasRef }: LiveFeedProps) {
       </CardHeader>
 
       <CardContent className="flex flex-1 flex-col gap-3 pb-4">
-        <div className="relative flex-1 min-h-[300px] rounded-lg border bg-background/50 overflow-hidden">
-          <PoseCanvas ref={meshCanvasRef} persons={poseStream.persons} />
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="inline-flex items-center gap-1 rounded-lg border bg-muted/30 p-1">
+            <Button
+              size="sm"
+              variant={viewMode === "2d" ? "secondary" : "ghost"}
+              onClick={() => setViewMode("2d")}
+            >
+              2D
+            </Button>
+            <Button
+              size="sm"
+              variant={viewMode === "3d" ? "secondary" : "ghost"}
+              onClick={() => setViewMode("3d")}
+            >
+              3D
+            </Button>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <Badge
+              variant="outline"
+              className={
+                pose3d.isAvailable
+                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                  : "border-muted-foreground/20 bg-muted/40 text-muted-foreground"
+              }
+            >
+              {pose3d.isAvailable ? "3D available" : "3D unavailable"}
+            </Badge>
+
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={seedPose3dDemo}
+              disabled={!pose3d.isAvailable || isSeeding}
+            >
+              {isSeeding ? "Seeding..." : "Seed demo"}
+            </Button>
+          </div>
         </div>
+
+        <div className="relative flex-1 min-h-[300px] rounded-lg border bg-background/50 overflow-hidden">
+          {showPose3d ? (
+            <Pose3DViewer
+              persons={pose3d.persons3d}
+              canvasRef={meshCanvasRef}
+            />
+          ) : (
+            <PoseCanvas persons={poseStream.persons} />
+          )}
+        </div>
+
+        <p className="text-xs text-muted-foreground">
+          3D stream: {pose3dStatusLabel}
+        </p>
+
+        {viewMode === "3d" && pose3d.error ? (
+          <p className="text-xs text-muted-foreground">{pose3d.error}</p>
+        ) : null}
 
         <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
           <div className="rounded-lg border bg-muted/30 p-2.5">
