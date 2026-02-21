@@ -1,6 +1,12 @@
 {
   "compilerOptions": {
     "strict": true,
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ESNext", "ESNext.Intl", "DOM", "DOM.Iterable"],
+    "types": ["bun"],
+    "skipLibCheck": true,
     "jsx": "react-jsx",
     "jsxImportSource": "hono/jsx"
   }
