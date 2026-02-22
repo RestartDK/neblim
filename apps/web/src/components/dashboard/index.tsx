@@ -49,6 +49,8 @@ function DashboardContent() {
     };
   }, [poseStream.isDemo]);
 
+  const isDeviceOnline = poseStream.connectionState === "connected";
+
   const events = useMeshMonitorAgent({
     canvasRef: meshCanvasRef,
     persons: poseStream.persons,
@@ -56,6 +58,7 @@ function DashboardContent() {
     timestamp: poseStream.lastUpdate,
     poseStats: poseStream.stats,
     isDemo: poseStream.isDemo,
+    enabled: isDeviceOnline,
   });
 
   return (

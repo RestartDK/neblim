@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type RefObject } from "react";
+import { useEffect, useMemo, useRef, useState, type RefObject } from "react";
 
 import { buildAiServerUrl } from "@/config/api";
 import type {
@@ -15,6 +15,7 @@ interface MeshMonitorAgentOptions {
   timestamp: string | null;
   poseStats: PoseFrameStats;
   isDemo: boolean;
+  enabled: boolean;
 }
 
 interface MeshClassificationResult {
@@ -56,14 +57,20 @@ const createEvent = (
   };
 };
 
-const initialEvents: ActivityEvent[] = [
-  createEvent(
-    "ok",
-    "Mesh Monitor Active",
-    "Screenshot classification loop initialized and waiting for the first analysis tick.",
-    "Passive observation enabled",
-  ),
-];
+const buildInitialEvent = (enabled: boolean): ActivityEvent =>
+  enabled
+    ? createEvent(
+        "ok",
+        "Mesh Monitor Active",
+        "Screenshot classification loop initialized and waiting for the first analysis tick.",
+        "Passive observation enabled",
+      )
+    : createEvent(
+        "warning",
+        "Mesh Monitor Paused",
+        "AI screenshot classification stays idle while the device is offline.",
+        "Waiting for device online state",
+      );
 
 const isMeshClassificationResult = (
   value: unknown,
@@ -98,14 +105,16 @@ export function useMeshMonitorAgent({
   timestamp,
   poseStats,
   isDemo,
+  enabled,
 }: MeshMonitorAgentOptions): ActivityEvent[] {
-  const [events, setEvents] = useState<ActivityEvent[]>(initialEvents);
+  const [events, setEvents] = useState<ActivityEvent[]>([]);
 
   const personsRef = useRef(persons);
   const frameIdRef = useRef(frameId);
   const timestampRef = useRef(timestamp);
   const poseStatsRef = useRef(poseStats);
   const isDemoRef = useRef(isDemo);
+  const enabledRef = useRef(enabled);
 
   const dedupeAtRef = useRef<Map<string, number>>(new Map());
   const lastErrorEventAt = useRef(0);
@@ -131,6 +140,21 @@ export function useMeshMonitorAgent({
   }, [isDemo]);
 
   useEffect(() => {
+    enabledRef.current = enabled;
+  }, [enabled]);
+
+  useEffect(() => {
+    dedupeAtRef.current.clear();
+    lastErrorEventAt.current = 0;
+  }, [enabled]);
+
+  const statusEvent = useMemo(() => buildInitialEvent(enabled), [enabled]);
+
+  useEffect(() => {
+    if (!enabled) {
+      return;
+    }
+
     let cancelled = false;
     let timeoutId: number | undefined;
     let inFlight = false;
@@ -212,6 +236,10 @@ export function useMeshMonitorAgent({
       inFlight = true;
 
       try {
+        if (!enabledRef.current) {
+          return;
+        }
+
         if (document.visibilityState !== "visible") {
           return;
         }
@@ -303,7 +331,7 @@ export function useMeshMonitorAgent({
 
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [canvasRef]);
+  }, [canvasRef, enabled]);
 
-  return events;
+  return [statusEvent, ...events].slice(0, MAX_EVENTS);
 }

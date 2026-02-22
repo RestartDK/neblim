@@ -14,7 +14,6 @@ import type { HealthState } from "@/hooks/use-health";
 import { usePose3dStream } from "@/hooks/use-pose3d-stream";
 import type { PoseStreamState } from "@/hooks/use-pose-stream";
 import { Pose3DViewer } from "./pose-3d-viewer";
-import { PoseCanvas } from "./pose-canvas";
 
 interface StatItem {
   label: string;
@@ -52,8 +51,6 @@ interface LiveFeedProps {
   meshCanvasRef: RefObject<HTMLCanvasElement | null>;
 }
 
-type ViewMode = "2d" | "3d";
-
 const formatRelativeTime = (timestamp: string | null, now: number): string => {
   if (!timestamp) {
     return "No updates";
@@ -70,11 +67,8 @@ const formatRelativeTime = (timestamp: string | null, now: number): string => {
 
 export function LiveFeed({ poseStream, health, meshCanvasRef }: LiveFeedProps) {
   const [now, setNow] = useState(() => Date.now());
-  const [viewMode, setViewMode] = useState<ViewMode>("3d");
   const [isSeeding, setIsSeeding] = useState(false);
   const pose3d = usePose3dStream();
-
-  const showPose3d = viewMode === "3d" && (pose3d.isAvailable || pose3d.isDemo);
 
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -201,22 +195,12 @@ export function LiveFeed({ poseStream, health, meshCanvasRef }: LiveFeedProps) {
 
       <CardContent className="flex flex-1 flex-col gap-3 pb-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="inline-flex items-center gap-1 rounded-lg border bg-muted/30 p-1">
-            <Button
-              size="sm"
-              variant={viewMode === "2d" ? "secondary" : "ghost"}
-              onClick={() => setViewMode("2d")}
-            >
-              2D
-            </Button>
-            <Button
-              size="sm"
-              variant={viewMode === "3d" ? "secondary" : "ghost"}
-              onClick={() => setViewMode("3d")}
-            >
-              3D
-            </Button>
-          </div>
+          <Badge
+            variant="outline"
+            className="border-muted-foreground/20 bg-muted/40 text-muted-foreground"
+          >
+            3D mode only
+          </Badge>
 
           <div className="flex items-center gap-2">
             <Badge
@@ -248,21 +232,14 @@ export function LiveFeed({ poseStream, health, meshCanvasRef }: LiveFeedProps) {
         </div>
 
         <div className="relative flex-1 min-h-[300px] rounded-lg border bg-background/50 overflow-hidden">
-          {showPose3d ? (
-            <Pose3DViewer
-              persons={pose3d.persons3d}
-              canvasRef={meshCanvasRef}
-            />
-          ) : (
-            <PoseCanvas persons={poseStream.persons} />
-          )}
+          <Pose3DViewer persons={pose3d.persons3d} canvasRef={meshCanvasRef} />
         </div>
 
         <p className="text-xs text-muted-foreground">
           3D stream: {pose3dStatusLabel}
         </p>
 
-        {viewMode === "3d" && pose3d.error ? (
+        {pose3d.error ? (
           <p className="text-xs text-muted-foreground">{pose3d.error}</p>
         ) : null}
 
