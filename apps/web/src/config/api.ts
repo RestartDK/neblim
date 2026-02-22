@@ -2,8 +2,8 @@ const stripTrailingSlash = (value: string): string => value.replace(/\/+$/, "");
 
 const DEFAULT_API_BASE_URL = "http://127.0.0.1:8787";
 const DEFAULT_WS_BASE_URL = "ws://127.0.0.1:8787";
-const DEFAULT_POSE3D_API_BASE_URL = "http://127.0.0.1:8788";
-const DEFAULT_POSE3D_WS_BASE_URL = "ws://127.0.0.1:8788";
+const DEFAULT_POSE3D_API_BASE_URL = "http://127.0.0.1:8787";
+const DEFAULT_POSE3D_WS_BASE_URL = "ws://127.0.0.1:8787";
 const DEFAULT_AI_SERVER_BASE_URL = "http://localhost:8001";
 
 export const BASE_URL = stripTrailingSlash(

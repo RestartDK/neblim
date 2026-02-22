@@ -2,7 +2,7 @@
   "name": "ingest",
   "private": true,
   "scripts": {
-    "dev": "RUST_LOG=${RUST_LOG:-info} RUSTFLAGS='-Awarnings' cargo run -p wifi-densepose-server",
+    "dev": "set -a; [ -f .env ] && . ./.env; set +a; RUST_LOG=${RUST_LOG:-info} RUSTFLAGS='-Awarnings' cargo run -p wifi-densepose-server",
     "build": "cargo check -p wifi-densepose-server",
     "check-types": "cargo check --workspace",
     "lint": "cargo fmt --all --check"
