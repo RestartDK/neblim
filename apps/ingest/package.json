@@ -1,0 +1,10 @@
+{
+  "name": "ingest",
+  "private": true,
+  "scripts": {
+    "dev": "cargo run -p wifi-densepose-server",
+    "build": "cargo check -p wifi-densepose-server",
+    "check-types": "cargo check --workspace",
+    "lint": "cargo fmt --all --check"
+  }
+}
