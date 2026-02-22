@@ -1,9 +1,9 @@
 const stripTrailingSlash = (value: string): string => value.replace(/\/+$/, "");
 
-const DEFAULT_API_BASE_URL = "http://localhost:8000";
-const DEFAULT_WS_BASE_URL = "ws://localhost:8000";
-const DEFAULT_POSE3D_API_BASE_URL = "http://127.0.0.1:8787";
-const DEFAULT_POSE3D_WS_BASE_URL = "ws://127.0.0.1:8787";
+const DEFAULT_API_BASE_URL = "http://127.0.0.1:8787";
+const DEFAULT_WS_BASE_URL = "ws://127.0.0.1:8787";
+const DEFAULT_POSE3D_API_BASE_URL = "http://127.0.0.1:8788";
+const DEFAULT_POSE3D_WS_BASE_URL = "ws://127.0.0.1:8788";
 const DEFAULT_AI_SERVER_BASE_URL = "http://localhost:8001";
 
 export const BASE_URL = stripTrailingSlash(
@@ -27,13 +27,13 @@ export const AI_SERVER_BASE_URL = stripTrailingSlash(
 );
 
 export const API_ENDPOINTS = {
-  health: "/health/health",
-  healthLive: "/health/live",
-  currentPose: "/pose/current",
+  health: "/healthz",
+  healthLive: "/healthz",
+  currentPose: "/api/v1/pose/current",
   zonesSummary: "/pose/zones/summary",
   stats: "/pose/stats",
-  apiInfo: "/info",
-  wsPoseStream: "/api/v1/stream/pose",
+  apiInfo: "/",
+  wsPoseStream: "/ws/pose/stream",
 } as const;
 
 export const POSE3D_ENDPOINTS = {

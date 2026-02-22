@@ -6,6 +6,7 @@ import {
   type Pose3dFrame,
   type Pose3dPerson,
 } from "@/services/pose3d-service";
+import { poseService, type PosePerson } from "@/services/pose-service";
 import { type WebSocketConnectionState } from "@/services/websocket";
 
 const POSE3D_PROBE_TIMEOUT_MS = 2_500;
@@ -18,8 +19,56 @@ export interface Pose3dStreamState {
   lastUpdate: string | null;
   error: string | null;
   isAvailable: boolean;
+  isDemo: boolean;
   seedDemo: (survivors?: number) => Promise<void>;
 }
+
+const clamp = (value: number, min: number, max: number): number =>
+  Math.max(min, Math.min(max, value));
+
+const average = (values: number[]): number => {
+  if (values.length === 0) {
+    return 0;
+  }
+
+  const total = values.reduce((sum, value) => sum + value, 0);
+  return total / values.length;
+};
+
+const projectPersonTo3d = (person: PosePerson, index: number): Pose3dPerson => {
+  const visiblePoints = person.keypoints.filter(
+    (keypoint) => keypoint.confidence > 0.2,
+  );
+  const centroidX = average(visiblePoints.map((point) => point.x)) || 0.5;
+  const centroidY = average(visiblePoints.map((point) => point.y)) || 0.5;
+
+  const shoulderY = average(
+    [person.keypoints[5], person.keypoints[6]]
+      .filter((point) => point && point.confidence > 0.2)
+      .map((point) => point.y),
+  );
+  const ankleY = average(
+    [person.keypoints[15], person.keypoints[16]]
+      .filter((point) => point && point.confidence > 0.2)
+      .map((point) => point.y),
+  );
+
+  const estimatedHeight = clamp(ankleY - shoulderY || 0.45, 0.2, 0.9);
+  const isFloorActivity =
+    person.activity === "falling" || person.activity === "on_floor";
+
+  return {
+    id: person.id || `demo-person-${index + 1}`,
+    confidence: person.confidence,
+    location_3d: {
+      x: (centroidX - 0.5) * 6,
+      y: isFloorActivity ? 0.2 : estimatedHeight * 2.2,
+      z: (centroidY - 0.5) * 8,
+      uncertainty_radius: clamp((1 - person.confidence) * 2 + 0.25, 0.2, 1.8),
+      confidence: person.confidence,
+    },
+  };
+};
 
 const probePose3dAvailability = async (): Promise<boolean> => {
   const controller = new AbortController();
@@ -55,6 +104,7 @@ export function usePose3dStream(): Pose3dStreamState {
   const [lastUpdate, setLastUpdate] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [isAvailable, setIsAvailable] = useState(false);
+  const [isDemo, setIsDemo] = useState(false);
 
   const frameTimesRef = useRef<number[]>([]);
 
@@ -86,6 +136,9 @@ export function usePose3dStream(): Pose3dStreamState {
   }, []);
 
   useEffect(() => {
+    let demoFrameId: number | null = null;
+    let disposed = false;
+
     const applyFrame = (frame: Pose3dFrame) => {
       const now = Date.now();
       const recentFrameTimes = [...frameTimesRef.current, now].filter(
@@ -101,8 +154,39 @@ export function usePose3dStream(): Pose3dStreamState {
 
     if (!isAvailable) {
       pose3dService.disconnect();
-      return;
+
+      setIsDemo(true);
+      setConnectionState("disconnected");
+      setError(null);
+
+      const renderDemoFrame = () => {
+        if (disposed) {
+          return;
+        }
+
+        const frame2d = poseService.buildDemoFrame(performance.now());
+        const demoFrame: Pose3dFrame = {
+          timestamp: frame2d.timestamp,
+          frame_id: frame2d.frameId,
+          coordinate_frame: "demo_world",
+          persons: frame2d.persons.map(projectPersonTo3d),
+        };
+
+        applyFrame(demoFrame);
+        demoFrameId = window.requestAnimationFrame(renderDemoFrame);
+      };
+
+      demoFrameId = window.requestAnimationFrame(renderDemoFrame);
+
+      return () => {
+        disposed = true;
+        if (demoFrameId !== null) {
+          window.cancelAnimationFrame(demoFrameId);
+        }
+      };
     }
+
+    setIsDemo(false);
 
     const unsubscribePose = pose3dService.subscribe((frame) => {
       applyFrame(frame);
@@ -122,6 +206,10 @@ export function usePose3dStream(): Pose3dStreamState {
     });
 
     return () => {
+      disposed = true;
+      if (demoFrameId !== null) {
+        window.cancelAnimationFrame(demoFrameId);
+      }
       unsubscribePose();
       unsubscribeState();
       unsubscribeError();
@@ -145,6 +233,7 @@ export function usePose3dStream(): Pose3dStreamState {
     lastUpdate,
     error,
     isAvailable,
+    isDemo,
     seedDemo,
   };
 }
