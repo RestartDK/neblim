@@ -5,6 +5,7 @@
     "dev": "set -a; [ -f .env ] && . ./.env; set +a; RUST_LOG=${RUST_LOG:-info} RUSTFLAGS='-Awarnings' cargo run -p wifi-densepose-server",
     "build": "cargo check -p wifi-densepose-server",
     "check-types": "cargo check --workspace",
-    "lint": "cargo fmt --all --check"
+    "lint": "cargo fmt --all --check",
+    "calibrate:motion": "./scripts/calibrate-motion.sh"
   }
 }

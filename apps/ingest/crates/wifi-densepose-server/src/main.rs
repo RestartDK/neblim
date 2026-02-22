@@ -2,8 +2,8 @@ use std::{
     env,
     net::SocketAddr,
     sync::{
-        atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
-        Arc, LazyLock,
+        atomic::{AtomicU64, Ordering},
+        Arc, LazyLock, Mutex,
     },
     time::Duration,
 };
@@ -43,42 +43,195 @@ use wifi_densepose_mat::{
 const DEFAULT_BIND_ADDR: &str = "127.0.0.1:8787";
 const DEFAULT_ALLOWED_ORIGINS: &str = "http://localhost:5173,http://127.0.0.1:5173";
 const DEFAULT_POSE_HEARTBEAT_SECS: u64 = 2;
-const DEFAULT_PRESENCE_TTL_MS: u64 = 1_500;
+const DEFAULT_PRESENCE_TTL_MS: u64 = 4_000;
 const DEFAULT_POSE_FRAME_TICK_MS: u64 = 250;
 const DEFAULT_ESP32_BAUD_RATE: u32 = 921_600;
 const DEFAULT_ESP32_READ_TIMEOUT_MS: u64 = 25;
+const DEFAULT_MOTION_ACTIVE_THRESHOLD: f64 = 0.24;
+const DEFAULT_MOTION_HIGH_THRESHOLD: f64 = 0.52;
 static PRESENCE_PERSON_ID: LazyLock<Uuid> =
     LazyLock::new(|| Uuid::parse_str("00000000-0000-0000-0000-000000000001").expect("valid UUID"));
 
 #[derive(Debug)]
 struct PresenceTracker {
-    last_seen_ms: AtomicU64,
-    last_sequence_num: AtomicU32,
-    has_sequence: AtomicBool,
+    state: Mutex<PresenceState>,
+}
+
+#[derive(Debug, Clone)]
+struct PresenceSnapshot {
+    last_seen_ms: u64,
+    last_sequence_num: Option<u32>,
+    last_rssi: Option<f64>,
+    packet_count: u64,
+    subcarriers: usize,
+    packet_interval_ema_ms: Option<f64>,
+    motion_score: f64,
+    csi_quality: f64,
+    x: f64,
+    y: f64,
+    z: f64,
+}
+
+#[derive(Debug, Clone)]
+struct PresenceState {
+    last_seen_ms: u64,
+    last_sequence_num: Option<u32>,
+    last_rssi: Option<f64>,
+    packet_count: u64,
+    subcarriers: usize,
+    packet_interval_ema_ms: Option<f64>,
+    last_amplitude_mean: Option<f64>,
+    last_amplitude_std: Option<f64>,
+    motion_score: f64,
+    csi_quality: f64,
+    x: f64,
+    y: f64,
+    z: f64,
+}
+
+impl Default for PresenceState {
+    fn default() -> Self {
+        Self {
+            last_seen_ms: 0,
+            last_sequence_num: None,
+            last_rssi: None,
+            packet_count: 0,
+            subcarriers: 0,
+            packet_interval_ema_ms: None,
+            last_amplitude_mean: None,
+            last_amplitude_std: None,
+            motion_score: 0.0,
+            csi_quality: 0.45,
+            x: 0.0,
+            y: 1.2,
+            z: -2.0,
+        }
+    }
 }
 
 impl PresenceTracker {
     fn new() -> Self {
         Self {
-            last_seen_ms: AtomicU64::new(0),
-            last_sequence_num: AtomicU32::new(0),
-            has_sequence: AtomicBool::new(false),
+            state: Mutex::new(PresenceState::default()),
         }
     }
 
-    fn mark_seen(&self, sequence_num: Option<u32>) {
-        self.last_seen_ms
-            .store(current_time_millis(), Ordering::Relaxed);
+    fn mark_seen(&self, sequence_num: Option<u32>, rssi: Option<f64>, amplitudes: &[f64]) {
+        let now_ms = current_time_millis();
+        let mut state = self.lock_state();
+
+        let prev_seen_ms = state.last_seen_ms;
+        state.last_seen_ms = now_ms;
+        state.packet_count = state.packet_count.saturating_add(1);
+        state.subcarriers = amplitudes.len();
 
         if let Some(sequence_num) = sequence_num {
-            self.last_sequence_num
-                .store(sequence_num, Ordering::Relaxed);
-            self.has_sequence.store(true, Ordering::Relaxed);
+            state.last_sequence_num = Some(sequence_num);
+        }
+
+        if let Some(rssi) = rssi {
+            state.last_rssi = Some(rssi);
+        }
+
+        if prev_seen_ms > 0 {
+            let interval_ms = now_ms.saturating_sub(prev_seen_ms) as f64;
+            state.packet_interval_ema_ms = Some(match state.packet_interval_ema_ms {
+                Some(previous) => previous * 0.90 + interval_ms * 0.10,
+                None => interval_ms,
+            });
+        }
+
+        let amplitude_mean = if amplitudes.is_empty() {
+            None
+        } else {
+            Some(amplitudes.iter().sum::<f64>() / amplitudes.len() as f64)
+        };
+
+        let amplitude_std = amplitude_mean.map(|mean| {
+            let variance = amplitudes
+                .iter()
+                .map(|value| (value - mean).powi(2))
+                .sum::<f64>()
+                / amplitudes.len() as f64;
+            variance.sqrt()
+        });
+
+        let mut motion_total = 0.0;
+        let mut motion_components = 0u64;
+
+        if let (Some(current), Some(previous)) = (amplitude_mean, state.last_amplitude_mean) {
+            motion_total += ((current - previous).abs() / 10.0).clamp(0.0, 1.0);
+            motion_components += 1;
+        }
+
+        if let (Some(current), Some(previous)) = (amplitude_std, state.last_amplitude_std) {
+            motion_total += ((current - previous).abs() / 8.0).clamp(0.0, 1.0);
+            motion_components += 1;
+        }
+
+        if let (Some(current), Some(previous)) = (rssi, state.last_rssi) {
+            motion_total += ((current - previous).abs() / 10.0).clamp(0.0, 1.0);
+            motion_components += 1;
+        }
+
+        let instantaneous_motion = if motion_components == 0 {
+            state.motion_score * 0.92
+        } else {
+            (motion_total / motion_components as f64).clamp(0.0, 1.0)
+        };
+
+        state.motion_score = (state.motion_score * 0.88 + instantaneous_motion * 0.12).clamp(0.0, 1.0);
+
+        let rssi_quality = state
+            .last_rssi
+            .map(|value| ((value + 90.0) / 40.0).clamp(0.0, 1.0))
+            .unwrap_or(0.45);
+        let subcarrier_quality = (amplitudes.len() as f64 / 192.0).clamp(0.0, 1.0);
+        let stability_quality = amplitude_std
+            .map(|value| (1.0 - (value / 24.0)).clamp(0.0, 1.0))
+            .unwrap_or(0.5);
+
+        state.csi_quality =
+            (0.45 * rssi_quality + 0.35 * subcarrier_quality + 0.20 * stability_quality).clamp(0.0, 1.0);
+
+        if let Some(value) = amplitude_mean {
+            state.last_amplitude_mean = Some(value);
+        }
+        if let Some(value) = amplitude_std {
+            state.last_amplitude_std = Some(value);
+        }
+
+        let phase_seed = sequence_num
+            .or(state.last_sequence_num)
+            .unwrap_or((now_ms % u32::MAX as u64) as u32) as f64;
+        let phase = phase_seed * 0.035;
+        let sway = (phase.sin() * 0.6 + (phase * 0.31).cos() * 0.4) * (0.08 + state.motion_score * 0.85);
+        let amplitude_bias = amplitude_mean.map(|value| value.sin() * 0.02).unwrap_or(0.0);
+
+        state.x = sway + amplitude_bias;
+        state.y = 1.15 + (phase * 0.12).cos() * 0.05;
+        state.z = -2.0 + (phase * 0.27).sin() * (0.1 + state.motion_score * 0.70);
+    }
+
+    fn snapshot(&self) -> PresenceSnapshot {
+        let state = self.lock_state();
+        PresenceSnapshot {
+            last_seen_ms: state.last_seen_ms,
+            last_sequence_num: state.last_sequence_num,
+            last_rssi: state.last_rssi,
+            packet_count: state.packet_count,
+            subcarriers: state.subcarriers,
+            packet_interval_ema_ms: state.packet_interval_ema_ms,
+            motion_score: state.motion_score,
+            csi_quality: state.csi_quality,
+            x: state.x,
+            y: state.y,
+            z: state.z,
         }
     }
 
     fn is_recent(&self, ttl_ms: u64) -> bool {
-        let last_seen_ms = self.last_seen_ms.load(Ordering::Relaxed);
+        let last_seen_ms = self.snapshot().last_seen_ms;
         if last_seen_ms == 0 {
             return false;
         }
@@ -86,15 +239,10 @@ impl PresenceTracker {
         current_time_millis().saturating_sub(last_seen_ms) <= ttl_ms
     }
 
-    fn last_seen_ms(&self) -> u64 {
-        self.last_seen_ms.load(Ordering::Relaxed)
-    }
-
-    fn last_sequence_num(&self) -> Option<u32> {
-        if self.has_sequence.load(Ordering::Relaxed) {
-            Some(self.last_sequence_num.load(Ordering::Relaxed))
-        } else {
-            None
+    fn lock_state(&self) -> std::sync::MutexGuard<'_, PresenceState> {
+        match self.state.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
         }
     }
 }
@@ -113,6 +261,8 @@ struct ServerConfig {
     esp32_port: Option<String>,
     esp32_baud_rate: u32,
     esp32_read_timeout_ms: u64,
+    motion_active_threshold: f64,
+    motion_high_threshold: f64,
 }
 
 impl ServerConfig {
@@ -172,6 +322,22 @@ impl ServerConfig {
         }
         .max(1);
 
+        let motion_active_threshold = match env::var("WIFI_DENSEPOSE_MOTION_ACTIVE_THRESHOLD") {
+            Ok(value) => value
+                .parse::<f64>()
+                .context("failed to parse WIFI_DENSEPOSE_MOTION_ACTIVE_THRESHOLD")?,
+            Err(_) => DEFAULT_MOTION_ACTIVE_THRESHOLD,
+        }
+        .clamp(0.01, 0.95);
+
+        let motion_high_threshold = match env::var("WIFI_DENSEPOSE_MOTION_HIGH_THRESHOLD") {
+            Ok(value) => value
+                .parse::<f64>()
+                .context("failed to parse WIFI_DENSEPOSE_MOTION_HIGH_THRESHOLD")?,
+            Err(_) => DEFAULT_MOTION_HIGH_THRESHOLD,
+        }
+        .clamp((motion_active_threshold + 0.05).min(0.99), 0.99);
+
         Ok(Self {
             bind_addr,
             allowed_origins,
@@ -181,6 +347,8 @@ impl ServerConfig {
             esp32_port,
             esp32_baud_rate,
             esp32_read_timeout_ms,
+            motion_active_threshold,
+            motion_high_threshold,
         })
     }
 }
@@ -198,6 +366,8 @@ struct PoseLocationProvider {
     mat_state: MatAppState,
     presence: Arc<PresenceTracker>,
     presence_ttl_ms: u64,
+    motion_active_threshold: f64,
+    motion_high_threshold: f64,
     tx: broadcast::Sender<PoseBroadcast>,
     frame_counter: Arc<AtomicU64>,
 }
@@ -214,6 +384,20 @@ struct PoseFrame {
     frame_id: u64,
     coordinate_frame: String,
     persons: Vec<PosePerson>,
+    metadata: PoseFrameMetadata,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct PoseFrameMetadata {
+    csi_quality: f64,
+    motion_score: f64,
+    signal_strength: Option<f64>,
+    packet_count: u64,
+    sequence_num: Option<u32>,
+    subcarriers: usize,
+    packet_rate_hz: Option<f64>,
+    motion_active_threshold: f64,
+    motion_high_threshold: f64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -260,12 +444,20 @@ struct DemoSeedRequest {
 }
 
 impl PoseLocationProvider {
-    fn new(mat_state: MatAppState, presence: Arc<PresenceTracker>, presence_ttl_ms: u64) -> Self {
+    fn new(
+        mat_state: MatAppState,
+        presence: Arc<PresenceTracker>,
+        presence_ttl_ms: u64,
+        motion_active_threshold: f64,
+        motion_high_threshold: f64,
+    ) -> Self {
         let (tx, _) = broadcast::channel(256);
         Self {
             mat_state,
             presence,
             presence_ttl_ms,
+            motion_active_threshold,
+            motion_high_threshold,
             tx,
             frame_counter: Arc::new(AtomicU64::new(0)),
         }
@@ -276,6 +468,7 @@ impl PoseLocationProvider {
     }
 
     fn current_frame(&self) -> PoseFrame {
+        let presence_snapshot = self.presence.snapshot();
         let mut persons = self
             .mat_state
             .list_events()
@@ -303,24 +496,45 @@ impl PoseLocationProvider {
             .collect::<Vec<_>>();
 
         if self.presence.is_recent(self.presence_ttl_ms) {
+            let confidence =
+                (0.45 + presence_snapshot.csi_quality * 0.35 + presence_snapshot.motion_score * 0.20)
+                    .clamp(0.45, 0.98);
+
             persons.push(PosePerson {
                 id: *PRESENCE_PERSON_ID,
-                confidence: 0.75,
+                confidence,
                 location_3d: PoseLocation3d {
-                    x: 0.0,
-                    y: 1.2,
-                    z: -2.0,
-                    uncertainty_radius: 0.9,
-                    confidence: 0.75,
+                    x: presence_snapshot.x,
+                    y: presence_snapshot.y,
+                    z: presence_snapshot.z,
+                    uncertainty_radius: (1.25 - presence_snapshot.csi_quality * 0.75).clamp(0.3, 1.5),
+                    confidence,
                 },
             });
         }
+
+        let packet_rate_hz = presence_snapshot
+            .packet_interval_ema_ms
+            .and_then(|value| if value > 0.0 { Some(1000.0 / value) } else { None });
+
+        let metadata = PoseFrameMetadata {
+            csi_quality: presence_snapshot.csi_quality,
+            motion_score: presence_snapshot.motion_score,
+            signal_strength: presence_snapshot.last_rssi,
+            packet_count: presence_snapshot.packet_count,
+            sequence_num: presence_snapshot.last_sequence_num,
+            subcarriers: presence_snapshot.subcarriers,
+            packet_rate_hz,
+            motion_active_threshold: self.motion_active_threshold,
+            motion_high_threshold: self.motion_high_threshold,
+        };
 
         PoseFrame {
             timestamp: Utc::now(),
             frame_id: self.frame_counter.fetch_add(1, Ordering::Relaxed) + 1,
             coordinate_frame: "world_meters".to_string(),
             persons,
+            metadata,
         }
     }
 
@@ -397,6 +611,8 @@ async fn main() -> anyhow::Result<()> {
         mat_state.clone(),
         Arc::clone(&presence),
         config.presence_ttl_ms,
+        config.motion_active_threshold,
+        config.motion_high_threshold,
     );
 
     pose_provider.start_event_bridge();
@@ -502,9 +718,14 @@ async fn start_esp32_ingestion_if_configured(
 
             let first_sensor = reading.readings.first();
             let sequence_num = first_sensor.and_then(|sensor| sensor.sequence_num);
-            presence.mark_seen(sequence_num);
+            let amplitudes = first_sensor
+                .map(|sensor| sensor.amplitudes.as_slice())
+                .unwrap_or(&[]);
+
+            presence.mark_seen(sequence_num, reading.metadata.rssi, amplitudes);
 
             if packet_count == 1 || packet_count % 100 == 0 {
+                let snapshot = presence.snapshot();
                 let subcarriers = first_sensor
                     .map(|sensor| sensor.amplitudes.len())
                     .unwrap_or(0);
@@ -514,9 +735,11 @@ async fn start_esp32_ingestion_if_configured(
                     packet_count,
                     subcarriers,
                     sequence_num = ?sequence_num,
-                    presence_last_seen_ms = presence.last_seen_ms(),
-                    presence_sequence_num = ?presence.last_sequence_num(),
+                    presence_last_seen_ms = snapshot.last_seen_ms,
+                    presence_sequence_num = ?snapshot.last_sequence_num,
                     rssi = ?reading.metadata.rssi,
+                    motion_score = snapshot.motion_score,
+                    csi_quality = snapshot.csi_quality,
                     "ESP32 CSI packet received"
                 );
             }

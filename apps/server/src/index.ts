@@ -32,6 +32,8 @@ app.get("/", (c) => {
       chat: "POST /api/chat",
       fileSummary: "POST /api/file-summary",
       meshClassify: "POST /api/mesh-classify",
+      elevenlabsConversationToken:
+        "GET /api/elevenlabs/conversation-token?agentId=<agent-id>",
     },
   });
 });
@@ -216,6 +218,63 @@ app.post("/api/mesh-classify", async (c) => {
           error instanceof Error
             ? error.message
             : "Failed to classify mesh image",
+      },
+      500,
+    );
+  }
+});
+
+app.get("/api/elevenlabs/conversation-token", async (c) => {
+  try {
+    const agentId = c.req.query("agentId")?.trim();
+
+    if (!agentId) {
+      return c.json({ error: "Query parameter agentId is required" }, 400);
+    }
+
+    const endpoint = new URL(
+      "https://api.elevenlabs.io/v1/convai/conversation/token",
+    );
+    endpoint.searchParams.set("agent_id", agentId);
+
+    const headers: Record<string, string> = {};
+    if (Bun.env.ELEVENLABS_API_KEY) {
+      headers["xi-api-key"] = Bun.env.ELEVENLABS_API_KEY;
+    }
+
+    const response = await fetch(endpoint, {
+      method: "GET",
+      headers,
+    });
+
+    if (!response.ok) {
+      const details = await response.text();
+      return c.json(
+        {
+          error: "Failed to fetch ElevenLabs conversation token",
+          upstreamStatus: response.status,
+          details,
+        },
+        502,
+      );
+    }
+
+    const payload = (await response.json()) as { token?: unknown };
+    if (typeof payload.token !== "string" || payload.token.length === 0) {
+      return c.json(
+        { error: "ElevenLabs response did not include a token" },
+        502,
+      );
+    }
+
+    return c.json({ token: payload.token });
+  } catch (error) {
+    return c.json(
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Failed to issue conversation token",
       },
       500,
     );

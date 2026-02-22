@@ -8,6 +8,9 @@ import { BackendProvider } from "@/hooks/use-backend-detector";
 import { useHealth } from "@/hooks/use-health";
 import { usePoseStream } from "@/hooks/use-pose-stream";
 import { useMeshMonitorAgent } from "@/hooks/use-mesh-monitor-agent";
+import { useElevenlabsFallbackAgent } from "@/hooks/use-elevenlabs-fallback-agent";
+
+let hasHardcodedElevenLabsTestTriggered = false;
 
 function DashboardContent() {
   const poseStream = usePoseStream();
@@ -51,6 +54,10 @@ function DashboardContent() {
 
   const isDeviceOnline = poseStream.connectionState === "connected";
 
+  const fallbackAgent = useElevenlabsFallbackAgent({
+    enabled: true,
+  });
+
   const events = useMeshMonitorAgent({
     canvasRef: meshCanvasRef,
     persons: poseStream.persons,
@@ -59,7 +66,35 @@ function DashboardContent() {
     poseStats: poseStream.stats,
     isDemo: poseStream.isDemo,
     enabled: isDeviceOnline,
+    onBadClassification: fallbackAgent.triggerFallbackFromClassification,
   });
+
+  useEffect(() => {
+    if (hasHardcodedElevenLabsTestTriggered) {
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      if (hasHardcodedElevenLabsTestTriggered) {
+        return;
+      }
+
+      hasHardcodedElevenLabsTestTriggered = true;
+
+      void fallbackAgent.triggerFallbackFromClassification({
+        severity: "critical",
+        title: "Demo fallback trigger",
+        description:
+          "Synthetic bad classification to validate ElevenLabs escalation flow.",
+        action: "Initiate emergency check-in call",
+        confidence: 0.93,
+      });
+    }, 1500);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [fallbackAgent.triggerFallbackFromClassification]);
 
   return (
     <div className="flex h-screen flex-col bg-background">
@@ -84,7 +119,16 @@ function DashboardContent() {
           </div>
 
           <div>
-            <VoiceAgentCalls />
+            <VoiceAgentCalls
+              agentName="neblim"
+              agentId={fallbackAgent.agentId}
+              status={fallbackAgent.status}
+              isSpeaking={fallbackAgent.isSpeaking}
+              autoStartCount={fallbackAgent.autoStartCount}
+              lastTrigger={fallbackAgent.lastTrigger}
+              lastError={fallbackAgent.lastError}
+              onStop={fallbackAgent.stopFallbackSession}
+            />
           </div>
         </div>
       </main>
