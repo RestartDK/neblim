@@ -5,7 +5,11 @@
     "GOOGLE_GENERATIVE_AI_API_KEY",
     "PORT",
     "VITE_API_BASE_URL",
-    "VITE_WS_BASE_URL"
+    "VITE_WS_BASE_URL",
+    "VITE_POSE3D_API_BASE_URL",
+    "VITE_POSE3D_WS_BASE_URL",
+    "POSE_BRIDGE_SERIAL_PORT",
+    "POSE_BRIDGE_BAUD_RATE"
   ],
   "tasks": {
     "build": {

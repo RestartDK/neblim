@@ -74,7 +74,7 @@ export function LiveFeed({ poseStream, health, meshCanvasRef }: LiveFeedProps) {
   const [isSeeding, setIsSeeding] = useState(false);
   const pose3d = usePose3dStream();
 
-  const showPose3d = viewMode === "3d" && pose3d.isAvailable;
+  const showPose3d = viewMode === "3d" && (pose3d.isAvailable || pose3d.isDemo);
 
   useEffect(() => {
     const interval = window.setInterval(() => {
@@ -160,12 +160,14 @@ export function LiveFeed({ poseStream, health, meshCanvasRef }: LiveFeedProps) {
         ? "Degraded"
         : "Unhealthy";
 
-  const pose3dStatusLabel = pose3d.isAvailable
-    ? `${pose3d.connectionState} • ${pose3d.fps} fps • ${formatRelativeTime(
-        pose3d.lastUpdate,
-        now,
-      )}`
-    : "offline";
+  const pose3dStatusLabel = pose3d.isDemo
+    ? `demo • ${pose3d.fps} fps • ${formatRelativeTime(pose3d.lastUpdate, now)}`
+    : pose3d.isAvailable
+      ? `${pose3d.connectionState} • ${pose3d.fps} fps • ${formatRelativeTime(
+          pose3d.lastUpdate,
+          now,
+        )}`
+      : "offline";
 
   const seedPose3dDemo = async () => {
     setIsSeeding(true);
@@ -220,19 +222,25 @@ export function LiveFeed({ poseStream, health, meshCanvasRef }: LiveFeedProps) {
             <Badge
               variant="outline"
               className={
-                pose3d.isAvailable
-                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-                  : "border-muted-foreground/20 bg-muted/40 text-muted-foreground"
+                pose3d.isDemo
+                  ? "border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-400"
+                  : pose3d.isAvailable
+                    ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                    : "border-muted-foreground/20 bg-muted/40 text-muted-foreground"
               }
             >
-              {pose3d.isAvailable ? "3D available" : "3D unavailable"}
+              {pose3d.isDemo
+                ? "3D demo"
+                : pose3d.isAvailable
+                  ? "3D available"
+                  : "3D unavailable"}
             </Badge>
 
             <Button
               size="sm"
               variant="outline"
               onClick={seedPose3dDemo}
-              disabled={!pose3d.isAvailable || isSeeding}
+              disabled={!pose3d.isAvailable || pose3d.isDemo || isSeeding}
             >
               {isSeeding ? "Seeding..." : "Seed demo"}
             </Button>

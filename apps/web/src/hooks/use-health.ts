@@ -70,8 +70,23 @@ export function useHealth(): HealthState {
 
     const loadHealth = async () => {
       try {
-        const health = await apiClient.getHealth()
+        const health = (await apiClient.getHealth()) as HealthResponse | string
         if (isDisposed) {
+          return
+        }
+
+        if (typeof health === "string") {
+          const isOk = health.trim().toLowerCase() === "ok"
+          setState({
+            status: isOk ? "healthy" : "unknown",
+            components: {
+              pose3d: isOk ? "healthy" : "unknown",
+            },
+            metrics: {
+              source: "healthz",
+            },
+            isLoading: false,
+          })
           return
         }
 
