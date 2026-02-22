@@ -20,6 +20,7 @@ interface VoiceAgentCallsProps {
   autoStartCount: number;
   lastTrigger: FallbackTrigger | null;
   lastError: string | null;
+  onTriggerIncident: () => void;
   onStop: () => void;
 }
 
@@ -61,6 +62,7 @@ export function VoiceAgentCalls({
   autoStartCount,
   lastTrigger,
   lastError,
+  onTriggerIncident,
   onStop,
 }: VoiceAgentCallsProps) {
   const statusEntry = statusConfig[status] ?? {
@@ -76,7 +78,7 @@ export function VoiceAgentCalls({
         <CardTitle>Voice Agent Calls</CardTitle>
         <CardDescription>
           ElevenLabs fallback escalation when mesh classification is warning or
-          critical
+          critical. Use Trigger incident to test the flow manually.
         </CardDescription>
       </CardHeader>
 
@@ -164,15 +166,21 @@ export function VoiceAgentCalls({
             <Mic className="size-3.5" />
             WebRTC connection
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={onStop}
-            disabled={!canStop}
-          >
-            <PhoneOff className="size-3.5" />
-            Stop session
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="destructive" size="sm" onClick={onTriggerIncident}>
+              <ShieldAlert className="size-3.5" />
+              Trigger incident
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onStop}
+              disabled={!canStop}
+            >
+              <PhoneOff className="size-3.5" />
+              Stop session
+            </Button>
+          </div>
         </div>
       </CardContent>
     </Card>

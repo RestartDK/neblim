@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { DashboardHeader } from "./header";
 import { LiveFeed } from "./live-feed";
 import { AgentStatusFeed } from "./agent-status-feed";
@@ -10,13 +10,12 @@ import { usePoseStream } from "@/hooks/use-pose-stream";
 import { useMeshMonitorAgent } from "@/hooks/use-mesh-monitor-agent";
 import { useElevenlabsFallbackAgent } from "@/hooks/use-elevenlabs-fallback-agent";
 
-let hasHardcodedElevenLabsTestTriggered = false;
-
 function DashboardContent() {
   const poseStream = usePoseStream();
   const health = useHealth();
   const [demoUser, setDemoUser] = useState<DemoUser | null>(null);
   const meshCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const hasDemoIncidentTriggeredRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -57,6 +56,20 @@ function DashboardContent() {
   const fallbackAgent = useElevenlabsFallbackAgent({
     enabled: true,
   });
+  const triggerFallbackFromClassification =
+    fallbackAgent.triggerFallbackFromClassification;
+
+  const triggerTestIncident = useCallback(() => {
+    void triggerFallbackFromClassification({
+      severity: "critical",
+      title: "Bathroom fall risk detected",
+      description:
+        "Demo incident: the resident collapsed near the bathroom and has been motionless for over one minute.",
+      action:
+        "Launch urgent voice check-in and confirm if emergency services are needed",
+      confidence: 0.96,
+    });
+  }, [triggerFallbackFromClassification]);
 
   const events = useMeshMonitorAgent({
     canvasRef: meshCanvasRef,
@@ -66,35 +79,38 @@ function DashboardContent() {
     poseStats: poseStream.stats,
     isDemo: poseStream.isDemo,
     enabled: isDeviceOnline,
-    onBadClassification: fallbackAgent.triggerFallbackFromClassification,
+    onBadClassification: triggerFallbackFromClassification,
   });
 
   useEffect(() => {
-    if (hasHardcodedElevenLabsTestTriggered) {
+    if (!poseStream.isDemo) {
+      hasDemoIncidentTriggeredRef.current = false;
+    }
+  }, [poseStream.isDemo]);
+
+  useEffect(() => {
+    if (!poseStream.isDemo) {
+      return;
+    }
+
+    if (hasDemoIncidentTriggeredRef.current) {
       return;
     }
 
     const timeoutId = window.setTimeout(() => {
-      if (hasHardcodedElevenLabsTestTriggered) {
+      if (hasDemoIncidentTriggeredRef.current) {
         return;
       }
 
-      hasHardcodedElevenLabsTestTriggered = true;
+      hasDemoIncidentTriggeredRef.current = true;
 
-      void fallbackAgent.triggerFallbackFromClassification({
-        severity: "critical",
-        title: "Demo fallback trigger",
-        description:
-          "Synthetic bad classification to validate ElevenLabs escalation flow.",
-        action: "Initiate emergency check-in call",
-        confidence: 0.93,
-      });
-    }, 1500);
+      triggerTestIncident();
+    }, 500);
 
     return () => {
       window.clearTimeout(timeoutId);
     };
-  }, [fallbackAgent.triggerFallbackFromClassification]);
+  }, [poseStream.isDemo, triggerTestIncident]);
 
   return (
     <div className="flex h-screen flex-col bg-background">
@@ -127,6 +143,7 @@ function DashboardContent() {
               autoStartCount={fallbackAgent.autoStartCount}
               lastTrigger={fallbackAgent.lastTrigger}
               lastError={fallbackAgent.lastError}
+              onTriggerIncident={triggerTestIncident}
               onStop={fallbackAgent.stopFallbackSession}
             />
           </div>

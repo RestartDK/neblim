@@ -1,149 +1,220 @@
-# Turborepo starter
+# Neblim
 
-## Local services
+**An invisible, camera-free security system that knows who's in your home, what they're doing, and autonomously calls for help when something's wrong.**
 
-Running `turbo run dev` from the repo root now starts all runtime services:
+---
 
-- `apps/web` (Vite frontend)
-- `apps/server` (Bun API server)
-- `apps/ingest` (Rust `wifi-densepose-server`)
+## The Problem
 
-Useful scoped commands:
+AI is lowering the cost of identifying and targeting vulnerable people. Seniors living alone, people with predictable routines, households with no security infrastructure — they're easier to profile than ever. Physical intrusion and home invasion remain serious threats, and existing defenses all share the same blind spots:
 
-- `turbo run dev --filter=ingest`
-- `turbo run dev --filter=server`
-- `turbo run dev --filter=neblim-app`
+- **Cameras** don't cover bathrooms, bedrooms, or anywhere people expect privacy
+- **Motion sensors** know "something moved" — not what, not who, not how many
+- **Smart locks and alarms** require the resident to respond to an alert themselves
 
-This Turborepo starter is maintained by the Turborepo core team.
+Every one of these systems fails the people who need protection most: those who can't fight back, can't respond fast enough, or don't realize something is wrong until it's too late.
 
-## Using this example
+## The Solution
 
-Run the following command:
+Neblim is a passive physical security system built on WiFi sensing. A single device uses existing WiFi signals to track human presence and body pose through walls — no cameras, no wearables, nothing to interact with.
+
+### Occupancy Intelligence
+
+The system knows how many bodies are in the home at all times, through every wall and door. An unexpected second person triggers an immediate graduated alert to family members or authorities. No camera footage needed, no line-of-sight required.
+
+### Behavioral Baseline as Intrusion Detection
+
+Neblim learns the resident's normal patterns — sleep at 10pm, kitchen at 7am, living room in the evening. Deviations from that baseline drive autonomous response:
+
+- Movement at 3am in an entry hallway
+- Sudden absence of the resident's signal
+- Two bodies detected where there should be one
+
+These aren't generic "motion detected" alerts. They're context-aware anomalies evaluated against a learned model of what normal looks like.
+
+### Body Pose as Threat Context
+
+Because WiFi DensePose provides skeletal tracking, the system can distinguish between "resident sat down on the couch" and "resident is on the ground while a second person is standing over them." That context is what gets sent to emergency services — not a blinking notification, but an autonomous assessment of what's actually happening.
+
+### Autonomous Escalation
+
+When the system detects a critical event, it doesn't wait for the resident to press a button. An AI voice agent initiates a check-in call directly to the resident via WebRTC. If the resident doesn't respond or the situation escalates, the system alerts family contacts and emergency services with full situational context.
+
+---
+
+## Defensive Acceleration
+
+AI lowers the cost of identifying and targeting vulnerable people. Neblim raises the cost of successfully attacking them — passively, autonomously, without requiring the target to do anything. Defensive technology outpacing offensive capability.
+
+---
+
+## Architecture
+
+```
+ESP32 (WiFi CSI) ──serial──> Ingest Server (Rust/Axum :8787)
+                                   │
+                           ┌───────┴────────┐
+                           │  Presence       │
+                           │  Tracker        │
+                           │  ─────────────  │
+                           │  Occupancy      │
+                           │  Motion score   │
+                           │  3D coordinates │
+                           │  CSI quality    │
+                           └───────┬────────┘
+                                   │
+               REST + WebSocket    │
+                                   ▼
+                           Dashboard (React/Vite :5173)
+                             │
+                     ┌───────┴────────┐
+                     │  3D Pose Mesh  │
+                     │  (Three.js)    │
+                     └───────┬────────┘
+                             │  canvas capture every 4s
+                             ▼
+                     AI Server (Bun/Hono :8001)
+                             │
+                             │  /api/mesh-classify
+                             ▼
+                     Google Gemini 2.5 Flash
+                             │
+                             │  { severity, context, action }
+                             ▼
+                     Dashboard ──if critical──> ElevenLabs Voice Agent
+                                                (WebRTC call to resident)
+```
+
+### How It Works
+
+1. An ESP32 device captures WiFi Channel State Information (CSI) and streams it over serial at 921600 baud
+2. The Rust ingest server processes CSI packets — computing RSSI, amplitude statistics, motion scores (EMA-smoothed), and 3D position estimates from phase/amplitude data
+3. Pose frames broadcast to the dashboard every 250ms via WebSocket
+4. The dashboard renders a real-time 3D body mesh and captures screenshots every 4 seconds
+5. Screenshots are sent to the AI server, where Gemini classifies the scene with structured output (severity, description, recommended action, confidence)
+6. On warning/critical classification, the system auto-initiates a voice check-in call via ElevenLabs WebRTC
+7. If the resident is unresponsive or the threat is confirmed, escalation proceeds to designated contacts and emergency services
+
+---
+
+## Tech Stack
+
+| Layer                 | Technology                                                |
+| --------------------- | --------------------------------------------------------- |
+| **Hardware**          | ESP32 (WiFi CSI capture)                                  |
+| **Ingest Server**     | Rust, Axum, Tokio, serialport, rustfft, ndarray           |
+| **ML/Inference**      | tch (PyTorch), ONNX Runtime, Candle                       |
+| **Signal Processing** | FFT-based CSI analysis, EMA motion scoring                |
+| **AI Server**         | Bun, Hono, Vercel AI SDK, Google Gemini 2.5 Flash         |
+| **Voice Agent**       | ElevenLabs Conversational AI (WebRTC)                     |
+| **Dashboard**         | React 19, Vite, Tailwind CSS, React Three Fiber, Three.js |
+| **Monorepo**          | Turborepo, Bun workspaces                                 |
+
+## Repository Structure
+
+```
+neblim-app/
+  apps/
+    ingest/       Rust workspace — WiFi CSI ingestion, presence tracking, pose server
+    server/       Bun/Hono — AI classification, voice agent token proxy
+    web/          React/Vite — real-time 3D monitoring dashboard
+  packages/
+    ui/           Shared React component library
+    eslint-config/
+    typescript-config/
+```
+
+### Ingest Server Crates
+
+The Rust ingest server is a Cargo workspace with focused crates:
+
+| Crate                     | Role                                                               |
+| ------------------------- | ------------------------------------------------------------------ |
+| `wifi-densepose-server`   | Main binary — Axum HTTP/WS, ESP32 serial, presence tracking        |
+| `wifi-densepose-core`     | Shared domain types                                                |
+| `wifi-densepose-signal`   | CSI signal processing (FFT, amplitude analysis)                    |
+| `wifi-densepose-nn`       | Neural network inference (PyTorch, ONNX, Candle)                   |
+| `wifi-densepose-hardware` | Hardware abstraction (serial, pcap)                                |
+| `wifi-densepose-mat`      | Mass casualty assessment — survivor detection, triage, vital signs |
+| `wifi-densepose-api`      | API route layer                                                    |
+| `wifi-densepose-db`       | Persistence (Postgres, SQLite, Redis)                              |
+| `wifi-densepose-config`   | Configuration management                                           |
+| `wifi-densepose-wasm`     | WebAssembly bindings                                               |
+| `wifi-densepose-cli`      | CLI tooling                                                        |
+
+---
+
+## Getting Started
+
+### Prerequisites
+
+- [Bun](https://bun.sh) >= 1.3
+- [Rust](https://rustup.rs) (stable)
+- Node.js >= 18
+- ESP32 with WiFi CSI firmware (for live data; demo mode available without hardware)
+
+### Install and Run
 
 ```sh
-npx create-turbo@latest
-```
+# Install dependencies
+bun install
 
-## What's inside?
-
-This Turborepo includes the following packages/apps:
-
-### Apps and Packages
-
-- `docs`: a [Next.js](https://nextjs.org/) app
-- `web`: another [Next.js](https://nextjs.org/) app
-- `@repo/ui`: a stub React component library shared by both `web` and `docs` applications
-- `@repo/eslint-config`: `eslint` configurations (includes `eslint-config-next` and `eslint-config-prettier`)
-- `@repo/typescript-config`: `tsconfig.json`s used throughout the monorepo
-
-Each package/app is 100% [TypeScript](https://www.typescriptlang.org/).
-
-### Utilities
-
-This Turborepo has some additional tools already setup for you:
-
-- [TypeScript](https://www.typescriptlang.org/) for static type checking
-- [ESLint](https://eslint.org/) for code linting
-- [Prettier](https://prettier.io) for code formatting
-
-### Build
-
-To build all apps and packages, run the following command:
-
-```
-cd my-turborepo
-
-# With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended)
-turbo build
-
-# Without [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation), use your package manager
-npx turbo build
-yarn dlx turbo build
-pnpm exec turbo build
-```
-
-You can build a specific package by using a [filter](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters):
-
-```
-# With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended)
-turbo build --filter=docs
-
-# Without [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation), use your package manager
-npx turbo build --filter=docs
-yarn exec turbo build --filter=docs
-pnpm exec turbo build --filter=docs
-```
-
-### Develop
-
-To develop all apps and packages, run the following command:
-
-```
-cd my-turborepo
-
-# With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended)
+# Start all services (ingest + server + web)
 turbo dev
 
-# Without [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation), use your package manager
-npx turbo dev
-yarn exec turbo dev
-pnpm exec turbo dev
+# Or start individually
+turbo dev --filter=ingest
+turbo dev --filter=server
+turbo dev --filter=neblim-app
 ```
 
-You can develop a specific package by using a [filter](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters):
+### Environment Variables
 
-```
-# With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended)
-turbo dev --filter=web
+Key configuration (set in `.env` or via shell):
 
-# Without [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation), use your package manager
-npx turbo dev --filter=web
-yarn exec turbo dev --filter=web
-pnpm exec turbo dev --filter=web
-```
+| Variable                          | Purpose                                               |
+| --------------------------------- | ----------------------------------------------------- |
+| `WIFI_DENSEPOSE_ESP32_PORT`       | Serial port for ESP32 (e.g., `/dev/ttyUSB0`)          |
+| `WIFI_DENSEPOSE_BIND`             | Ingest server bind address (default `127.0.0.1:8787`) |
+| `WIFI_DENSEPOSE_MOTION_THRESHOLD` | Motion detection sensitivity                          |
+| `GOOGLE_GENERATIVE_AI_API_KEY`    | Gemini API key for mesh classification                |
+| `ELEVENLABS_API_KEY`              | ElevenLabs key for voice agent                        |
+| `ELEVENLABS_AGENT_ID`             | ElevenLabs conversational agent ID                    |
 
-### Remote Caching
+### Demo Mode
 
-> [!TIP]
-> Vercel Remote Cache is free for all plans. Get started today at [vercel.com](https://vercel.com/signup?/signup?utm_source=remote-cache-sdk&utm_campaign=free_remote_cache).
+The system includes a demo mode that generates synthetic pose data when no ESP32 hardware is connected. The dashboard automatically falls back to demo mode if the ingest server backend is unavailable.
 
-Turborepo can use a technique known as [Remote Caching](https://turborepo.dev/docs/core-concepts/remote-caching) to share cache artifacts across machines, enabling you to share build caches with your team and CI/CD pipelines.
-
-By default, Turborepo will cache locally. To enable Remote Caching you will need an account with Vercel. If you don't have an account you can [create one](https://vercel.com/signup?utm_source=turborepo-examples), then enter the following commands:
-
-```
-cd my-turborepo
-
-# With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended)
-turbo login
-
-# Without [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation), use your package manager
-npx turbo login
-yarn exec turbo login
-pnpm exec turbo login
+```sh
+# Seed demo data
+curl -X POST http://127.0.0.1:8787/api/v1/pose/demo/seed
 ```
 
-This will authenticate the Turborepo CLI with your [Vercel account](https://vercel.com/docs/concepts/personal-accounts/overview).
+---
 
-Next, you can link your Turborepo to your Remote Cache by running the following command from the root of your Turborepo:
+## API Reference
 
-```
-# With [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation) installed (recommended)
-turbo link
+### Ingest Server (`:8787`)
 
-# Without [global `turbo`](https://turborepo.dev/docs/getting-started/installation#global-installation), use your package manager
-npx turbo link
-yarn exec turbo link
-pnpm exec turbo link
-```
+| Endpoint                 | Method | Description                 |
+| ------------------------ | ------ | --------------------------- |
+| `/healthz`               | GET    | Health check                |
+| `/api/v1/pose/current`   | GET    | Current pose frame snapshot |
+| `/ws/pose/stream`        | WS     | Real-time pose frame stream |
+| `/api/v1/pose/demo/seed` | POST   | Seed synthetic demo data    |
+| `/api/v1/mat/events`     | GET    | Assessment events           |
+| `/ws/mat/stream`         | WS     | Assessment event stream     |
 
-## Useful Links
+### AI Server (`:8001`)
 
-Learn more about the power of Turborepo:
+| Endpoint                             | Method | Description                                      |
+| ------------------------------------ | ------ | ------------------------------------------------ |
+| `/health`                            | GET    | Health check                                     |
+| `/api/mesh-classify`                 | POST   | Classify pose mesh screenshot (image + metadata) |
+| `/api/elevenlabs/conversation-token` | GET    | Voice agent session token                        |
 
-- [Tasks](https://turborepo.dev/docs/crafting-your-repository/running-tasks)
-- [Caching](https://turborepo.dev/docs/crafting-your-repository/caching)
-- [Remote Caching](https://turborepo.dev/docs/core-concepts/remote-caching)
-- [Filtering](https://turborepo.dev/docs/crafting-your-repository/running-tasks#using-filters)
-- [Configuration Options](https://turborepo.dev/docs/reference/configuration)
-- [CLI Usage](https://turborepo.dev/docs/reference/command-line-reference)
+---
+
+## License
+
+Proprietary. All rights reserved.

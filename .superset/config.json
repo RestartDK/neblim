@@ -1,6 +1,6 @@
 {
   "setup": [
-    "bun install\ncp $SUPERSET_ROOT_PATH/apps/server/.env ./apps/server/.env\ncp $SUPERSET_ROOT_PATH/apps/web/.env ./apps/web/.env"
+    "bun install\ncp $SUPERSET_ROOT_PATH/apps/server/.env ./apps/server/.env\ncp $SUPERSET_ROOT_PATH/apps/web/.env ./apps/web/.env\ncp $SUPERSET_ROOT_PATH/apps/ingest/.env ./apps/ingest/.env"
   ],
   "teardown": []
 }
