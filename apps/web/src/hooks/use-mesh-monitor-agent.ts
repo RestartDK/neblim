@@ -16,9 +16,10 @@ interface MeshMonitorAgentOptions {
   poseStats: PoseFrameStats;
   isDemo: boolean;
   enabled: boolean;
+  onBadClassification?: (result: MeshClassificationResult) => void;
 }
 
-interface MeshClassificationResult {
+export interface MeshClassificationResult {
   severity: ActivitySeverity;
   title: string;
   description: string;
@@ -106,6 +107,7 @@ export function useMeshMonitorAgent({
   poseStats,
   isDemo,
   enabled,
+  onBadClassification,
 }: MeshMonitorAgentOptions): ActivityEvent[] {
   const [events, setEvents] = useState<ActivityEvent[]>([]);
 
@@ -115,6 +117,7 @@ export function useMeshMonitorAgent({
   const poseStatsRef = useRef(poseStats);
   const isDemoRef = useRef(isDemo);
   const enabledRef = useRef(enabled);
+  const onBadClassificationRef = useRef(onBadClassification);
 
   const dedupeAtRef = useRef<Map<string, number>>(new Map());
   const lastErrorEventAt = useRef(0);
@@ -142,6 +145,10 @@ export function useMeshMonitorAgent({
   useEffect(() => {
     enabledRef.current = enabled;
   }, [enabled]);
+
+  useEffect(() => {
+    onBadClassificationRef.current = onBadClassification;
+  }, [onBadClassification]);
 
   useEffect(() => {
     dedupeAtRef.current.clear();
@@ -203,6 +210,10 @@ export function useMeshMonitorAgent({
           ...current,
         ].slice(0, MAX_EVENTS),
       );
+
+      if (result.severity !== "ok") {
+        onBadClassificationRef.current?.(result);
+      }
     };
 
     const pushClassifierErrorEvent = () => {

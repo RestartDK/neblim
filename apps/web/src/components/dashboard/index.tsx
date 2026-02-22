@@ -8,6 +8,7 @@ import { BackendProvider } from "@/hooks/use-backend-detector";
 import { useHealth } from "@/hooks/use-health";
 import { usePoseStream } from "@/hooks/use-pose-stream";
 import { useMeshMonitorAgent } from "@/hooks/use-mesh-monitor-agent";
+import { useElevenlabsFallbackAgent } from "@/hooks/use-elevenlabs-fallback-agent";
 
 function DashboardContent() {
   const poseStream = usePoseStream();
@@ -50,6 +51,9 @@ function DashboardContent() {
   }, [poseStream.isDemo]);
 
   const isDeviceOnline = poseStream.connectionState === "connected";
+  const fallbackAgent = useElevenlabsFallbackAgent({
+    enabled: isDeviceOnline,
+  });
 
   const events = useMeshMonitorAgent({
     canvasRef: meshCanvasRef,
@@ -59,6 +63,7 @@ function DashboardContent() {
     poseStats: poseStream.stats,
     isDemo: poseStream.isDemo,
     enabled: isDeviceOnline,
+    onBadClassification: fallbackAgent.triggerFallbackFromClassification,
   });
 
   return (
@@ -84,7 +89,16 @@ function DashboardContent() {
           </div>
 
           <div>
-            <VoiceAgentCalls />
+            <VoiceAgentCalls
+              agentName="neblim"
+              agentId={fallbackAgent.agentId}
+              status={fallbackAgent.status}
+              isSpeaking={fallbackAgent.isSpeaking}
+              autoStartCount={fallbackAgent.autoStartCount}
+              lastTrigger={fallbackAgent.lastTrigger}
+              lastError={fallbackAgent.lastError}
+              onStop={fallbackAgent.stopFallbackSession}
+            />
           </div>
         </div>
       </main>

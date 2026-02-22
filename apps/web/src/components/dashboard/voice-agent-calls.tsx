@@ -1,177 +1,180 @@
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { cn } from "@/lib/utils"
-import { Phone, PhoneOff, Clock } from "lucide-react"
-import { useEffect, useState } from "react"
+import { AlertTriangle, Bot, Mic, PhoneOff, ShieldAlert } from "lucide-react";
 
-type CallStatus = "active" | "queued" | "completed"
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import type { FallbackTrigger } from "@/hooks/use-elevenlabs-fallback-agent";
+import { cn } from "@/lib/utils";
 
-interface Call {
-  id: string
-  status: CallStatus
-  name: string
-  relation?: string
-  purpose: string
-  time?: string
-  response?: string
-  elapsed?: number // seconds for active calls
+interface VoiceAgentCallsProps {
+  agentName: string;
+  agentId: string;
+  status: string;
+  isSpeaking: boolean;
+  autoStartCount: number;
+  lastTrigger: FallbackTrigger | null;
+  lastError: string | null;
+  onStop: () => void;
 }
 
-const calls: Call[] = [
+const statusConfig: Record<string, { label: string; badgeClassName: string }> =
   {
-    id: "1",
-    status: "active",
-    name: "Margaret Chen",
-    purpose: 'Fall check-in: "Are you okay?"',
-    elapsed: 42,
-  },
-  {
-    id: "2",
-    status: "queued",
-    name: "Sarah Chen (Daughter)",
-    purpose: "Alert: Mother fall detected, awaiting response",
-  },
-]
+    connected: {
+      label: "CONNECTED",
+      badgeClassName: "bg-emerald-600 text-white",
+    },
+    connecting: {
+      label: "CONNECTING",
+      badgeClassName: "bg-amber-500 text-black",
+    },
+    disconnected: {
+      label: "IDLE",
+      badgeClassName: "bg-muted text-muted-foreground",
+    },
+  };
 
-const completedCalls: Call[] = [
-  {
-    id: "3",
-    status: "completed",
-    name: "Margaret",
-    purpose: "Daily check-in",
-    time: "11:30 AM",
-    response: "Responded OK",
-  },
-  {
-    id: "4",
-    status: "completed",
-    name: "Margaret",
-    purpose: "Good morning",
-    time: "8:00 AM",
-    response: "Responded OK",
-  },
-]
+const severityConfig: Record<FallbackTrigger["severity"], string> = {
+  critical: "border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-300",
+  warning:
+    "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-300",
+  ok: "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+};
 
-const statusConfig: Record<
-  CallStatus,
-  { label: string; border: string; bg: string; badgeBg: string; badgeText: string }
-> = {
-  active: {
-    label: "ACTIVE CALL",
-    border: "border-red-500/40 dark:border-red-500/30",
-    bg: "bg-red-500/5 dark:bg-red-500/10",
-    badgeBg: "bg-red-600 dark:bg-red-500",
-    badgeText: "text-white",
-  },
-  queued: {
-    label: "QUEUED",
-    border: "border-blue-500/40 dark:border-blue-500/30",
-    bg: "bg-blue-500/5 dark:bg-blue-500/10",
-    badgeBg: "bg-blue-600 dark:bg-blue-500",
-    badgeText: "text-white",
-  },
-  completed: {
-    label: "COMPLETED",
-    border: "border-border",
-    bg: "bg-muted/30",
-    badgeBg: "bg-muted",
-    badgeText: "text-muted-foreground",
-  },
-}
+const formatTriggerTime = (value: string): string =>
+  new Date(value).toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
 
-function ActiveCallTimer({ initial }: { initial: number }) {
-  const [seconds, setSeconds] = useState(initial)
+export function VoiceAgentCalls({
+  agentName,
+  agentId,
+  status,
+  isSpeaking,
+  autoStartCount,
+  lastTrigger,
+  lastError,
+  onStop,
+}: VoiceAgentCallsProps) {
+  const statusEntry = statusConfig[status] ?? {
+    label: status.toUpperCase(),
+    badgeClassName: "bg-muted text-muted-foreground",
+  };
 
-  useEffect(() => {
-    const interval = setInterval(() => setSeconds((s) => s + 1), 1000)
-    return () => clearInterval(interval)
-  }, [])
+  const canStop = status === "connected" || status === "connecting";
 
-  const min = Math.floor(seconds / 60)
-  const sec = seconds % 60
-
-  return (
-    <span className="text-lg font-semibold tabular-nums text-red-600 dark:text-red-400">
-      {min}:{sec.toString().padStart(2, "0")}
-    </span>
-  )
-}
-
-function ActiveCallCard({ call }: { call: Call }) {
-  const cfg = statusConfig[call.status]
-
-  return (
-    <div className={cn("rounded-lg border p-3 space-y-1.5", cfg.border, cfg.bg)}>
-      <div className="flex items-center justify-between">
-        <Badge className={cn("text-[10px] font-bold border-0", cfg.badgeBg, cfg.badgeText)}>
-          {cfg.label}
-        </Badge>
-        {call.status === "active" && call.elapsed != null && (
-          <ActiveCallTimer initial={call.elapsed} />
-        )}
-      </div>
-      <div className="flex items-center gap-2">
-        {call.status === "active" ? (
-          <Phone className="size-3.5 text-red-500" />
-        ) : (
-          <Clock className="size-3.5 text-blue-500" />
-        )}
-        <span className="text-sm font-semibold">
-          {call.name}
-          {call.relation && (
-            <span className="font-normal text-muted-foreground"> ({call.relation})</span>
-          )}
-        </span>
-      </div>
-      <p className="text-xs text-muted-foreground">{call.purpose}</p>
-    </div>
-  )
-}
-
-function CompletedCallRow({ call }: { call: Call }) {
-  return (
-    <div className="flex items-center justify-between rounded-lg border bg-muted/20 px-3 py-2">
-      <div className="flex items-center gap-2">
-        <PhoneOff className="size-3 text-muted-foreground" />
-        <span className="text-xs text-muted-foreground tabular-nums">{call.time}</span>
-        <span className="text-xs text-foreground">
-          {call.name} &mdash; {call.purpose}
-        </span>
-      </div>
-      {call.response && (
-        <span className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
-          {call.response}
-        </span>
-      )}
-    </div>
-  )
-}
-
-export function VoiceAgentCalls() {
   return (
     <Card className="flex h-full flex-col">
       <CardHeader>
         <CardTitle>Voice Agent Calls</CardTitle>
         <CardDescription>
-          Automated check-in calls and emergency contacts
+          ElevenLabs fallback escalation when mesh classification is warning or
+          critical
         </CardDescription>
       </CardHeader>
 
       <CardContent className="flex flex-1 flex-col gap-3">
-        {/* Active / queued calls */}
-        <div className="grid grid-cols-2 gap-2.5">
-          {calls.map((c) => (
-            <ActiveCallCard key={c.id} call={c} />
-          ))}
+        <div className="rounded-lg border bg-muted/20 p-3">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-sm font-semibold">
+              <Bot className="size-4 text-muted-foreground" />
+              {agentName}
+            </div>
+            <Badge
+              className={cn(
+                "border-0 text-[10px] font-bold",
+                statusEntry.badgeClassName,
+              )}
+            >
+              {statusEntry.label}
+            </Badge>
+          </div>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Agent ID: {agentId}
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Mode:{" "}
+            {status === "connected"
+              ? isSpeaking
+                ? "speaking"
+                : "listening"
+              : "standby"}
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Auto-started sessions:{" "}
+            <span className="font-semibold text-foreground">
+              {autoStartCount}
+            </span>
+          </p>
         </div>
 
-        {/* Completed calls */}
-        <div className="space-y-1.5">
-          {completedCalls.map((c) => (
-            <CompletedCallRow key={c.id} call={c} />
-          ))}
+        {lastTrigger ? (
+          <div
+            className={cn(
+              "rounded-lg border p-3",
+              severityConfig[lastTrigger.severity],
+            )}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide">
+                <ShieldAlert className="size-3.5" />
+                {lastTrigger.severity}
+              </div>
+              <span className="text-xs text-muted-foreground">
+                {formatTriggerTime(lastTrigger.triggeredAt)}
+              </span>
+            </div>
+            <p className="mt-1 text-sm font-semibold text-foreground">
+              {lastTrigger.title}
+            </p>
+            <p className="mt-1 text-xs text-foreground/80">
+              {lastTrigger.description}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Confidence {Math.round(lastTrigger.confidence * 100)}% •{" "}
+              {lastTrigger.action}
+            </p>
+          </div>
+        ) : (
+          <div className="rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
+            No fallback calls yet. Voice escalation starts automatically on bad
+            classifier responses.
+          </div>
+        )}
+
+        {lastError && (
+          <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300">
+            <div className="flex items-center gap-1.5 font-semibold uppercase tracking-wide">
+              <AlertTriangle className="size-3.5" />
+              Session Error
+            </div>
+            <p className="mt-1 normal-case">{lastError}</p>
+          </div>
+        )}
+
+        <div className="mt-auto flex items-center justify-between gap-2">
+          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Mic className="size-3.5" />
+            WebRTC connection
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onStop}
+            disabled={!canStop}
+          >
+            <PhoneOff className="size-3.5" />
+            Stop session
+          </Button>
         </div>
       </CardContent>
     </Card>
-  )
+  );
 }
