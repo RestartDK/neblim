@@ -1,6 +1,7 @@
 import { useConversation } from "@elevenlabs/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 
+import { buildAiServerUrl } from "@/config/api";
 import type { MeshClassificationResult } from "@/hooks/use-mesh-monitor-agent";
 
 const DEFAULT_AGENT_ID = "agent_4001kj21va8jea6rt51z9mm5158c";
@@ -26,6 +27,14 @@ const formatContextualUpdate = (result: MeshClassificationResult): string =>
     `Confidence: ${Math.round(result.confidence * 100)}%`,
   ].join(" ");
 
+const formatUserMessage = (result: MeshClassificationResult): string =>
+  [
+    "System escalation.",
+    `A ${result.severity} monitoring event was detected: ${result.title}.`,
+    "Call the resident now and perform an urgent safety check-in.",
+    "Start speaking immediately.",
+  ].join(" ");
+
 const toErrorMessage = (value: unknown): string => {
   if (typeof value === "string") {
     return value;
@@ -47,12 +56,36 @@ export function useElevenlabsFallbackAgent({
 }: UseElevenlabsFallbackAgentOptions) {
   const resolvedAgentId =
     agentId ?? import.meta.env.VITE_ELEVENLABS_AGENT_ID ?? DEFAULT_AGENT_ID;
-  const pendingContextRef = useRef<string | null>(null);
+  const pendingTriggerRef = useRef<MeshClassificationResult | null>(null);
   const lastStartAttemptAtRef = useRef(0);
 
   const [lastTrigger, setLastTrigger] = useState<FallbackTrigger | null>(null);
   const [lastError, setLastError] = useState<string | null>(null);
   const [autoStartCount, setAutoStartCount] = useState(0);
+
+  const fetchConversationToken = useCallback(async (): Promise<string> => {
+    const endpoint = buildAiServerUrl(
+      `/api/elevenlabs/conversation-token?agentId=${encodeURIComponent(resolvedAgentId)}`,
+    );
+
+    const response = await fetch(endpoint, {
+      method: "GET",
+    });
+
+    if (!response.ok) {
+      const details = await response.text();
+      throw new Error(
+        `Unable to fetch ElevenLabs conversation token (${response.status}): ${details}`,
+      );
+    }
+
+    const payload = (await response.json()) as { token?: unknown };
+    if (typeof payload.token !== "string" || payload.token.length === 0) {
+      throw new Error("Token response missing token value");
+    }
+
+    return payload.token;
+  }, [resolvedAgentId]);
 
   const conversation = useConversation({
     onConnect: () => {
@@ -73,15 +106,19 @@ export function useElevenlabsFallbackAgent({
       return;
     }
 
-    const pendingContext = pendingContextRef.current;
-    if (!pendingContext) {
+    const pendingTrigger = pendingTriggerRef.current;
+    if (!pendingTrigger) {
       return;
     }
 
-    pendingContextRef.current = null;
+    pendingTriggerRef.current = null;
+
+    const contextualUpdate = formatContextualUpdate(pendingTrigger);
+    const userMessage = formatUserMessage(pendingTrigger);
 
     try {
-      conversation.sendContextualUpdate(pendingContext);
+      conversation.sendContextualUpdate(contextualUpdate);
+      conversation.sendUserMessage(userMessage);
     } catch (error) {
       const message = toErrorMessage(error);
       console.error(`${LOG_PREFIX} Failed to send contextual update`, {
@@ -98,6 +135,7 @@ export function useElevenlabsFallbackAgent({
 
       const now = Date.now();
       const contextUpdate = formatContextualUpdate(result);
+      const userMessage = formatUserMessage(result);
 
       setLastTrigger({
         ...result,
@@ -108,6 +146,7 @@ export function useElevenlabsFallbackAgent({
       if (conversation.status === "connected") {
         try {
           conversation.sendContextualUpdate(contextUpdate);
+          conversation.sendUserMessage(userMessage);
         } catch (error) {
           const message = toErrorMessage(error);
           console.error(`${LOG_PREFIX} Failed to send live contextual update`, {
@@ -119,7 +158,7 @@ export function useElevenlabsFallbackAgent({
       }
 
       if (conversation.status === "connecting") {
-        pendingContextRef.current = contextUpdate;
+        pendingTriggerRef.current = result;
         return;
       }
 
@@ -128,12 +167,13 @@ export function useElevenlabsFallbackAgent({
       }
 
       lastStartAttemptAtRef.current = now;
-      pendingContextRef.current = contextUpdate;
+      pendingTriggerRef.current = result;
 
       try {
         await navigator.mediaDevices.getUserMedia({ audio: true });
+        const conversationToken = await fetchConversationToken();
         await conversation.startSession({
-          agentId: resolvedAgentId,
+          conversationToken,
           connectionType: "webrtc",
         });
         setAutoStartCount((current) => current + 1);
@@ -145,11 +185,11 @@ export function useElevenlabsFallbackAgent({
         setLastError(message);
       }
     },
-    [conversation, enabled, resolvedAgentId],
+    [conversation, enabled, fetchConversationToken],
   );
 
   const stopFallbackSession = useCallback(() => {
-    pendingContextRef.current = null;
+    pendingTriggerRef.current = null;
     conversation.endSession();
   }, [conversation]);
 

@@ -4,6 +4,7 @@
 
 - Bun 1.3+
 - `GOOGLE_GENERATIVE_AI_API_KEY` in your environment
+- `ELEVENLABS_API_KEY` in your environment (recommended for WebRTC token issuance)
 
 ## Install
 
@@ -24,6 +25,8 @@ The server runs on `http://localhost:8001` by default (`PORT` can override it).
 - `GET /health`
 - `POST /api/chat` (streams plain text)
 - `POST /api/file-summary` (multipart form upload with a `file` field)
+- `POST /api/mesh-classify` (multipart form upload with an `image` field)
+- `GET /api/elevenlabs/conversation-token?agentId=<agent-id>`
 
 ## Example requests
 

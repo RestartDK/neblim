@@ -65,6 +65,15 @@ interface ParsedPerson {
   confidence: number;
   activity?: string;
   keypoints: ParsedKeypoint[];
+  location3d?: ParsedLocation3d;
+}
+
+interface ParsedLocation3d {
+  x: number;
+  y: number;
+  z: number;
+  uncertaintyRadius: number;
+  confidence: number;
 }
 
 interface ExtractedPosePayload {
@@ -575,20 +584,36 @@ class PoseService {
   }
 
   private normalizePayload(payload: ExtractedPosePayload): PoseFrame | null {
+    const metadataMotionScore = clamp(
+      toNumber(payload.metadata.motion_score) ?? 0,
+      0,
+      1,
+    );
+    const motionHint = metadataMotionScore * 0.08;
+
     const parsedPersons = payload.persons
       .map((person, index) => this.parsePerson(person, index, payload.activity))
       .filter((person): person is ParsedPerson => person !== null);
 
     const bounds = this.resolveBounds(parsedPersons);
     const normalizedPersons = parsedPersons.map((person) => {
-      const keypoints = this.normalizeKeypoints(person.keypoints, bounds);
-      return this.enrichPerson({
-        id: person.id,
-        name: person.name,
-        confidence: person.confidence,
-        keypoints,
-        activity: person.activity,
-      });
+      const keypoints =
+        person.keypoints.length > 0
+          ? this.normalizeKeypoints(person.keypoints, bounds)
+          : person.location3d
+            ? this.buildSyntheticKeypointsFromLocation(person.location3d)
+            : [];
+
+      return this.enrichPerson(
+        {
+          id: person.id,
+          name: person.name,
+          confidence: person.confidence,
+          keypoints,
+          activity: person.activity,
+        },
+        motionHint,
+      );
     });
 
     if (normalizedPersons.length === 0) {
@@ -670,7 +695,9 @@ class PoseService {
     }
 
     const parsedKeypoints = this.parseKeypoints(rawPerson.keypoints);
-    if (parsedKeypoints.length === 0) {
+    const parsedLocation3d = this.parseLocation3d(rawPerson.location_3d);
+
+    if (parsedKeypoints.length === 0 && !parsedLocation3d) {
       return null;
     }
 
@@ -685,7 +712,175 @@ class PoseService {
       confidence: clamp(toNumber(rawPerson.confidence) ?? 0.8, 0, 1),
       activity: toStringValue(rawPerson.activity) ?? fallbackActivity,
       keypoints: parsedKeypoints,
+      location3d: parsedLocation3d,
     };
+  }
+
+  private parseLocation3d(input: unknown): ParsedLocation3d | undefined {
+    if (!input || !isRecord(input)) {
+      return undefined;
+    }
+
+    const x = toNumber(input.x);
+    const y = toNumber(input.y);
+    const z = toNumber(input.z);
+
+    if (x === null || y === null || z === null) {
+      return undefined;
+    }
+
+    return {
+      x,
+      y,
+      z,
+      uncertaintyRadius: clamp(
+        toNumber(input.uncertainty_radius) ?? 0.8,
+        0.2,
+        2,
+      ),
+      confidence: clamp(toNumber(input.confidence) ?? 0.72, 0.2, 1),
+    };
+  }
+
+  private buildSyntheticKeypointsFromLocation(
+    location: ParsedLocation3d,
+  ): PoseKeypoint[] {
+    const centerX = clamp(0.5 + location.x * 0.085, 0.12, 0.88);
+    const centerY = clamp(0.54 - location.z * 0.05, 0.2, 0.88);
+    const torsoHeight = clamp(0.24 + location.y * 0.035, 0.2, 0.34);
+    const shoulderWidth = clamp(
+      0.1 + location.uncertaintyRadius * 0.02,
+      0.1,
+      0.16,
+    );
+    const confidence = clamp(location.confidence, 0.35, 0.98);
+
+    return [
+      {
+        index: 0,
+        name: "nose",
+        x: centerX,
+        y: centerY - torsoHeight * 0.65,
+        confidence,
+      },
+      {
+        index: 1,
+        name: "left_eye",
+        x: centerX - 0.018,
+        y: centerY - torsoHeight * 0.69,
+        confidence: confidence * 0.95,
+      },
+      {
+        index: 2,
+        name: "right_eye",
+        x: centerX + 0.018,
+        y: centerY - torsoHeight * 0.69,
+        confidence: confidence * 0.95,
+      },
+      {
+        index: 3,
+        name: "left_ear",
+        x: centerX - 0.036,
+        y: centerY - torsoHeight * 0.64,
+        confidence: confidence * 0.88,
+      },
+      {
+        index: 4,
+        name: "right_ear",
+        x: centerX + 0.036,
+        y: centerY - torsoHeight * 0.64,
+        confidence: confidence * 0.88,
+      },
+      {
+        index: 5,
+        name: "left_shoulder",
+        x: centerX - shoulderWidth,
+        y: centerY - torsoHeight * 0.32,
+        confidence: confidence * 0.96,
+      },
+      {
+        index: 6,
+        name: "right_shoulder",
+        x: centerX + shoulderWidth,
+        y: centerY - torsoHeight * 0.32,
+        confidence: confidence * 0.96,
+      },
+      {
+        index: 7,
+        name: "left_elbow",
+        x: centerX - shoulderWidth * 1.22,
+        y: centerY + torsoHeight * 0.04,
+        confidence: confidence * 0.9,
+      },
+      {
+        index: 8,
+        name: "right_elbow",
+        x: centerX + shoulderWidth * 1.22,
+        y: centerY + torsoHeight * 0.04,
+        confidence: confidence * 0.9,
+      },
+      {
+        index: 9,
+        name: "left_wrist",
+        x: centerX - shoulderWidth * 1.4,
+        y: centerY + torsoHeight * 0.32,
+        confidence: confidence * 0.84,
+      },
+      {
+        index: 10,
+        name: "right_wrist",
+        x: centerX + shoulderWidth * 1.4,
+        y: centerY + torsoHeight * 0.32,
+        confidence: confidence * 0.84,
+      },
+      {
+        index: 11,
+        name: "left_hip",
+        x: centerX - shoulderWidth * 0.55,
+        y: centerY + torsoHeight * 0.33,
+        confidence: confidence * 0.95,
+      },
+      {
+        index: 12,
+        name: "right_hip",
+        x: centerX + shoulderWidth * 0.55,
+        y: centerY + torsoHeight * 0.33,
+        confidence: confidence * 0.95,
+      },
+      {
+        index: 13,
+        name: "left_knee",
+        x: centerX - shoulderWidth * 0.62,
+        y: centerY + torsoHeight * 0.92,
+        confidence: confidence * 0.88,
+      },
+      {
+        index: 14,
+        name: "right_knee",
+        x: centerX + shoulderWidth * 0.62,
+        y: centerY + torsoHeight * 0.92,
+        confidence: confidence * 0.88,
+      },
+      {
+        index: 15,
+        name: "left_ankle",
+        x: centerX - shoulderWidth * 0.68,
+        y: centerY + torsoHeight * 1.55,
+        confidence: confidence * 0.82,
+      },
+      {
+        index: 16,
+        name: "right_ankle",
+        x: centerX + shoulderWidth * 0.68,
+        y: centerY + torsoHeight * 1.55,
+        confidence: confidence * 0.82,
+      },
+    ].map((keypoint) => ({
+      ...keypoint,
+      x: clamp(keypoint.x, 0, 1),
+      y: clamp(keypoint.y, 0, 1),
+      confidence: clamp(keypoint.confidence, 0, 1),
+    }));
   }
 
   private parseKeypoints(input: unknown): ParsedKeypoint[] {
@@ -831,16 +1026,21 @@ class PoseService {
     return slots;
   }
 
-  private enrichPerson(input: {
-    id: string;
-    name?: string;
-    confidence: number;
-    keypoints: PoseKeypoint[];
-    activity?: string;
-  }): PosePerson {
+  private enrichPerson(
+    input: {
+      id: string;
+      name?: string;
+      confidence: number;
+      keypoints: PoseKeypoint[];
+      activity?: string;
+    },
+    motionHint = 0,
+  ): PosePerson {
     const centroid = this.calculateCentroid(input.keypoints);
     const previous = this.previousCentroids.get(input.id);
-    const movementDelta = previous ? distance(centroid, previous) : 0;
+    const movementDelta = previous
+      ? Math.max(distance(centroid, previous), motionHint)
+      : motionHint;
     this.previousCentroids.set(input.id, centroid);
 
     if (movementDelta > 0.008) {
@@ -946,6 +1146,22 @@ class PoseService {
     context: { processingTimeMs: number; metadata: Record<string, unknown> },
   ): PoseFrameStats {
     const quality = toNumber(context.metadata.csi_quality);
+    const motionScore = clamp(
+      toNumber(context.metadata.motion_score) ?? 0,
+      0,
+      1,
+    );
+    const motionActiveThreshold = clamp(
+      toNumber(context.metadata.motion_active_threshold) ?? 0.24,
+      0.05,
+      0.95,
+    );
+    const motionHighThreshold = clamp(
+      toNumber(context.metadata.motion_high_threshold) ?? 0.52,
+      Math.min(motionActiveThreshold + 0.02, 0.97),
+      0.99,
+    );
+
     const signalStrengthFromMetadata = toNumber(
       context.metadata.signal_strength,
     );
@@ -964,6 +1180,10 @@ class PoseService {
     );
 
     const primary = persons[0];
+    const inferredMovementDelta = Math.max(
+      primary?.movementDelta ?? 0,
+      motionScore * 0.08,
+    );
     const gaitLabel =
       primary?.gaitPattern === "unsteady"
         ? "Unsteady"
@@ -974,9 +1194,9 @@ class PoseService {
             : "No signal";
 
     const movementLabel =
-      (primary?.movementDelta ?? 0) > 0.03
+      motionScore >= motionHighThreshold
         ? "High"
-        : (primary?.movementDelta ?? 0) > 0.009
+        : motionScore >= motionActiveThreshold || inferredMovementDelta > 0.009
           ? "Active"
           : "Minimal";
 
