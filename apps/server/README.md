@@ -17,7 +17,7 @@ bun install
 bun run dev
 ```
 
-The server runs on `http://localhost:8000` by default (`PORT` can override it).
+The server runs on `http://localhost:8001` by default (`PORT` can override it).
 
 ## Endpoints
 
@@ -28,13 +28,13 @@ The server runs on `http://localhost:8000` by default (`PORT` can override it).
 ## Example requests
 
 ```sh
-curl -X POST http://localhost:8000/api/chat \
+curl -X POST http://localhost:8001/api/chat \
   -H "content-type: application/json" \
   -d '{"prompt":"Write a haiku about Bun and Hono."}'
 ```
 
 ```sh
-curl -X POST http://localhost:8000/api/file-summary \
+curl -X POST http://localhost:8001/api/file-summary \
   -F "file=@./sample.pdf" \
   -F "prompt=Summarize this document in five bullets."
 ```
