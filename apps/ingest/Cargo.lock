@@ -4119,6 +4119,7 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "wifi-densepose-mat",
+ "wifi-densepose-nn",
 ]
 
 [[package]]

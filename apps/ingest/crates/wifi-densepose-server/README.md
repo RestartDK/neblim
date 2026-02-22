@@ -8,6 +8,8 @@ Rust Axum server that composes:
 
 ## Endpoints
 
+- `GET /healthz`
+- `GET /healthz/details`
 - `GET /api/v1/mat/events`
 - `GET /ws/mat/stream`
 - `GET /api/v1/pose/current`
@@ -37,6 +39,14 @@ Environment overrides:
 - `WIFI_DENSEPOSE_ALLOWED_ORIGINS`
 - `WIFI_DENSEPOSE_POSE_HEARTBEAT_SECS`
 - `WIFI_DENSEPOSE_DASHBOARD_PORT` (only used by `scripts/pose-demo.sh`)
+- `WIFI_DENSEPOSE_ENABLE_NN_POSE`
+- `WIFI_DENSEPOSE_TRANSLATOR_MODEL_PATH`
+- `WIFI_DENSEPOSE_DENSEPOSE_MODEL_PATH`
+- `WIFI_DENSEPOSE_NN_WINDOW_SIZE`
+- `WIFI_DENSEPOSE_NN_SUBCARRIERS`
+- `WIFI_DENSEPOSE_NN_INPUT_CHANNELS`
+- `WIFI_DENSEPOSE_NN_INFERENCE_STRIDE`
+- `WIFI_DENSEPOSE_NN_MIN_CONFIDENCE`
 
 ## Test
 

@@ -131,7 +131,13 @@ pub trait Backend: Send + Sync {
         let mut inputs = HashMap::new();
         inputs.insert(input_names[0].clone(), input.clone());
 
-        let outputs = self.run(inputs)?;
+        let mut outputs = self.run(inputs)?;
+        if let Some(primary_output_name) = output_names.first() {
+            if let Some(primary_output) = outputs.remove(primary_output_name) {
+                return Ok(primary_output);
+            }
+        }
+
         outputs
             .into_iter()
             .next()
@@ -394,21 +400,32 @@ impl<B: Backend> WiFiDensePosePipeline<B> {
         let visual_features = self.translator_backend.run_single(csi_input)?;
 
         // Step 2: Run DensePose on visual features
+        let densepose_input_name = self
+            .densepose_backend
+            .input_names()
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| "features".to_string());
+
         let mut inputs = HashMap::new();
-        inputs.insert("features".to_string(), visual_features);
+        inputs.insert(densepose_input_name, visual_features);
 
         let outputs = self.densepose_backend.run(inputs)?;
 
         // Extract outputs
-        let segmentation = outputs
-            .get("segmentation")
-            .cloned()
-            .ok_or_else(|| NnError::inference("Missing segmentation output"))?;
+        let segmentation = Self::resolve_output(
+            &outputs,
+            &["segmentation", "seg", "part_logits", "coarse_segm"],
+            0,
+            "segmentation",
+        )?;
 
-        let uv_coordinates = outputs
-            .get("uv_coordinates")
-            .cloned()
-            .ok_or_else(|| NnError::inference("Missing uv_coordinates output"))?;
+        let uv_coordinates = Self::resolve_output(
+            &outputs,
+            &["uv_coordinates", "uv", "fine_uv", "uv_map"],
+            1,
+            "uv_coordinates",
+        )?;
 
         Ok(DensePoseOutput {
             segmentation,
@@ -425,6 +442,42 @@ impl<B: Backend> WiFiDensePosePipeline<B> {
     /// Get DensePose config
     pub fn densepose_config(&self) -> &DensePoseConfig {
         &self.densepose_config
+    }
+
+    fn resolve_output(
+        outputs: &HashMap<String, Tensor>,
+        preferred_names: &[&str],
+        fallback_index: usize,
+        output_label: &str,
+    ) -> NnResult<Tensor> {
+        for preferred in preferred_names {
+            if let Some(found) = outputs.get(*preferred) {
+                return Ok(found.clone());
+            }
+        }
+
+        for (name, value) in outputs {
+            let lower_name = name.to_ascii_lowercase();
+            if preferred_names
+                .iter()
+                .any(|preferred| lower_name.contains(&preferred.to_ascii_lowercase()))
+            {
+                return Ok(value.clone());
+            }
+        }
+
+        let mut sorted_names: Vec<&String> = outputs.keys().collect();
+        sorted_names.sort();
+
+        if let Some(name) = sorted_names.get(fallback_index) {
+            if let Some(found) = outputs.get(*name) {
+                return Ok(found.clone());
+            }
+        }
+
+        Err(NnError::inference(format!(
+            "Missing {output_label} output from DensePose backend"
+        )))
     }
 }
 

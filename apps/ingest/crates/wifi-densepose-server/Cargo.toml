@@ -18,6 +18,7 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 uuid = { version = "1.6", features = ["serde"] }
 wifi-densepose-mat.workspace = true
+wifi-densepose-nn.workspace = true
 
 [dev-dependencies]
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
