@@ -40,6 +40,9 @@ use wifi_densepose_mat::{
     LocationUncertainty, MovementProfile, MovementType, ScanZone, VitalSignsReading,
 };
 
+mod nn_pose;
+use nn_pose::{NeuralPoseEstimator, NnPoseConfigSnapshot, NnPoseMetrics};
+
 const DEFAULT_BIND_ADDR: &str = "127.0.0.1:8787";
 const DEFAULT_ALLOWED_ORIGINS: &str = "http://localhost:5173,http://127.0.0.1:5173";
 const DEFAULT_POSE_HEARTBEAT_SECS: u64 = 2;
@@ -51,6 +54,8 @@ const DEFAULT_MOTION_ACTIVE_THRESHOLD: f64 = 0.24;
 const DEFAULT_MOTION_HIGH_THRESHOLD: f64 = 0.52;
 static PRESENCE_PERSON_ID: LazyLock<Uuid> =
     LazyLock::new(|| Uuid::parse_str("00000000-0000-0000-0000-000000000001").expect("valid UUID"));
+static NN_PERSON_ID: LazyLock<Uuid> =
+    LazyLock::new(|| Uuid::parse_str("00000000-0000-0000-0000-000000000002").expect("valid UUID"));
 
 #[derive(Debug)]
 struct PresenceTracker {
@@ -180,7 +185,8 @@ impl PresenceTracker {
             (motion_total / motion_components as f64).clamp(0.0, 1.0)
         };
 
-        state.motion_score = (state.motion_score * 0.88 + instantaneous_motion * 0.12).clamp(0.0, 1.0);
+        state.motion_score =
+            (state.motion_score * 0.88 + instantaneous_motion * 0.12).clamp(0.0, 1.0);
 
         let rssi_quality = state
             .last_rssi
@@ -192,7 +198,8 @@ impl PresenceTracker {
             .unwrap_or(0.5);
 
         state.csi_quality =
-            (0.45 * rssi_quality + 0.35 * subcarrier_quality + 0.20 * stability_quality).clamp(0.0, 1.0);
+            (0.45 * rssi_quality + 0.35 * subcarrier_quality + 0.20 * stability_quality)
+                .clamp(0.0, 1.0);
 
         if let Some(value) = amplitude_mean {
             state.last_amplitude_mean = Some(value);
@@ -205,8 +212,11 @@ impl PresenceTracker {
             .or(state.last_sequence_num)
             .unwrap_or((now_ms % u32::MAX as u64) as u32) as f64;
         let phase = phase_seed * 0.035;
-        let sway = (phase.sin() * 0.6 + (phase * 0.31).cos() * 0.4) * (0.08 + state.motion_score * 0.85);
-        let amplitude_bias = amplitude_mean.map(|value| value.sin() * 0.02).unwrap_or(0.0);
+        let sway =
+            (phase.sin() * 0.6 + (phase * 0.31).cos() * 0.4) * (0.08 + state.motion_score * 0.85);
+        let amplitude_bias = amplitude_mean
+            .map(|value| value.sin() * 0.02)
+            .unwrap_or(0.0);
 
         state.x = sway + amplitude_bias;
         state.y = 1.15 + (phase * 0.12).cos() * 0.05;
@@ -231,12 +241,24 @@ impl PresenceTracker {
     }
 
     fn is_recent(&self, ttl_ms: u64) -> bool {
-        let last_seen_ms = self.snapshot().last_seen_ms;
+        let last_seen_ms = self.lock_state().last_seen_ms;
         if last_seen_ms == 0 {
             return false;
         }
 
         current_time_millis().saturating_sub(last_seen_ms) <= ttl_ms
+    }
+
+    fn ever_seen(&self) -> bool {
+        self.lock_state().packet_count > 0
+    }
+
+    fn ms_since_last_seen(&self) -> Option<u64> {
+        let last_seen_ms = self.lock_state().last_seen_ms;
+        if last_seen_ms == 0 {
+            return None;
+        }
+        Some(current_time_millis().saturating_sub(last_seen_ms))
     }
 
     fn lock_state(&self) -> std::sync::MutexGuard<'_, PresenceState> {
@@ -359,12 +381,14 @@ struct ServerState {
     pose_provider: PoseLocationProvider,
     demo_step: Arc<AtomicU64>,
     _presence: Arc<PresenceTracker>,
+    _nn_pose: Option<Arc<NeuralPoseEstimator>>,
 }
 
 #[derive(Clone)]
 struct PoseLocationProvider {
     mat_state: MatAppState,
     presence: Arc<PresenceTracker>,
+    nn_pose: Option<Arc<NeuralPoseEstimator>>,
     presence_ttl_ms: u64,
     motion_active_threshold: f64,
     motion_high_threshold: f64,
@@ -389,6 +413,11 @@ struct PoseFrame {
 
 #[derive(Debug, Clone, Serialize)]
 struct PoseFrameMetadata {
+    /// `"active"` = recent CSI packets, `"stale"` = had packets before but TTL expired,
+    /// `"unavailable"` = ESP32 never connected / no packets ever received
+    presence_state: &'static str,
+    /// Milliseconds since last CSI packet, if any were ever received.
+    ms_since_last_packet: Option<u64>,
     csi_quality: f64,
     motion_score: f64,
     signal_strength: Option<f64>,
@@ -398,6 +427,11 @@ struct PoseFrameMetadata {
     packet_rate_hz: Option<f64>,
     motion_active_threshold: f64,
     motion_high_threshold: f64,
+    nn_enabled: bool,
+    nn_model_loaded: bool,
+    nn_inference_count: u64,
+    nn_inference_errors: u64,
+    nn_last_confidence: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -432,6 +466,33 @@ struct PoseHeartbeatWsEnvelope {
 }
 
 #[derive(Debug, Serialize)]
+struct HealthzDetailsResponse {
+    status: &'static str,
+    nn: NnHealthDetails,
+}
+
+#[derive(Debug, Serialize)]
+struct NnHealthDetails {
+    enabled: bool,
+    model_loaded: bool,
+    inference_count: u64,
+    inference_errors: u64,
+    last_confidence: Option<f64>,
+    config: Option<NnHealthConfig>,
+}
+
+#[derive(Debug, Serialize)]
+struct NnHealthConfig {
+    window_size: usize,
+    subcarriers: usize,
+    input_channels: usize,
+    inference_stride: u64,
+    min_confidence: f64,
+    translator_model_configured: bool,
+    densepose_model_configured: bool,
+}
+
+#[derive(Debug, Serialize)]
 struct DemoSeedResponse {
     event_id: Uuid,
     step: u64,
@@ -447,6 +508,7 @@ impl PoseLocationProvider {
     fn new(
         mat_state: MatAppState,
         presence: Arc<PresenceTracker>,
+        nn_pose: Option<Arc<NeuralPoseEstimator>>,
         presence_ttl_ms: u64,
         motion_active_threshold: f64,
         motion_high_threshold: f64,
@@ -455,6 +517,7 @@ impl PoseLocationProvider {
         Self {
             mat_state,
             presence,
+            nn_pose,
             presence_ttl_ms,
             motion_active_threshold,
             motion_high_threshold,
@@ -469,6 +532,19 @@ impl PoseLocationProvider {
 
     fn current_frame(&self) -> PoseFrame {
         let presence_snapshot = self.presence.snapshot();
+        let presence_is_recent = self.presence.is_recent(self.presence_ttl_ms);
+        let presence_ever_seen = self.presence.ever_seen();
+        let ms_since_last_packet = self.presence.ms_since_last_seen();
+        let nn_metrics = self
+            .nn_pose
+            .as_ref()
+            .map(|estimator| estimator.metrics())
+            .unwrap_or_else(NnPoseMetrics::disabled);
+        let nn_prediction = self
+            .nn_pose
+            .as_ref()
+            .and_then(|estimator| estimator.latest_estimate(self.presence_ttl_ms));
+
         let mut persons = self
             .mat_state
             .list_events()
@@ -495,10 +571,23 @@ impl PoseLocationProvider {
             })
             .collect::<Vec<_>>();
 
-        if self.presence.is_recent(self.presence_ttl_ms) {
-            let confidence =
-                (0.45 + presence_snapshot.csi_quality * 0.35 + presence_snapshot.motion_score * 0.20)
-                    .clamp(0.45, 0.98);
+        if let Some(nn_person) = nn_prediction {
+            persons.push(PosePerson {
+                id: *NN_PERSON_ID,
+                confidence: nn_person.confidence,
+                location_3d: PoseLocation3d {
+                    x: nn_person.x,
+                    y: nn_person.y,
+                    z: nn_person.z,
+                    uncertainty_radius: nn_person.uncertainty_radius,
+                    confidence: nn_person.confidence,
+                },
+            });
+        } else if presence_is_recent {
+            let confidence = (0.45
+                + presence_snapshot.csi_quality * 0.35
+                + presence_snapshot.motion_score * 0.20)
+                .clamp(0.45, 0.98);
 
             persons.push(PosePerson {
                 id: *PRESENCE_PERSON_ID,
@@ -507,17 +596,32 @@ impl PoseLocationProvider {
                     x: presence_snapshot.x,
                     y: presence_snapshot.y,
                     z: presence_snapshot.z,
-                    uncertainty_radius: (1.25 - presence_snapshot.csi_quality * 0.75).clamp(0.3, 1.5),
+                    uncertainty_radius: (1.25 - presence_snapshot.csi_quality * 0.75)
+                        .clamp(0.3, 1.5),
                     confidence,
                 },
             });
         }
 
-        let packet_rate_hz = presence_snapshot
-            .packet_interval_ema_ms
-            .and_then(|value| if value > 0.0 { Some(1000.0 / value) } else { None });
+        let presence_state = if presence_is_recent {
+            "active"
+        } else if presence_ever_seen {
+            "stale"
+        } else {
+            "unavailable"
+        };
+
+        let packet_rate_hz = presence_snapshot.packet_interval_ema_ms.and_then(|value| {
+            if value > 0.0 {
+                Some(1000.0 / value)
+            } else {
+                None
+            }
+        });
 
         let metadata = PoseFrameMetadata {
+            presence_state,
+            ms_since_last_packet,
             csi_quality: presence_snapshot.csi_quality,
             motion_score: presence_snapshot.motion_score,
             signal_strength: presence_snapshot.last_rssi,
@@ -527,6 +631,11 @@ impl PoseLocationProvider {
             packet_rate_hz,
             motion_active_threshold: self.motion_active_threshold,
             motion_high_threshold: self.motion_high_threshold,
+            nn_enabled: nn_metrics.enabled,
+            nn_model_loaded: nn_metrics.model_loaded,
+            nn_inference_count: nn_metrics.inference_count,
+            nn_inference_errors: nn_metrics.inference_errors,
+            nn_last_confidence: nn_metrics.last_confidence,
         };
 
         PoseFrame {
@@ -607,9 +716,18 @@ async fn main() -> anyhow::Result<()> {
     let config = ServerConfig::from_env()?;
     let mat_state = MatAppState::new();
     let presence = Arc::new(PresenceTracker::new());
+    let nn_pose_estimator = NeuralPoseEstimator::from_env()?.map(Arc::new);
+
+    if nn_pose_estimator.is_some() {
+        info!("NN pose inference enabled (ESP32 CSI -> DensePose pipeline)");
+    } else {
+        info!("NN pose inference disabled; presence fallback remains active");
+    }
+
     let pose_provider = PoseLocationProvider::new(
         mat_state.clone(),
         Arc::clone(&presence),
+        nn_pose_estimator.clone(),
         config.presence_ttl_ms,
         config.motion_active_threshold,
         config.motion_high_threshold,
@@ -619,18 +737,24 @@ async fn main() -> anyhow::Result<()> {
     pose_provider.start_heartbeat(Duration::from_secs(config.pose_heartbeat_secs));
     pose_provider.start_frame_ticker(Duration::from_millis(config.pose_frame_tick_ms));
 
-    let _esp32_ingestion =
-        start_esp32_ingestion_if_configured(&config, Arc::clone(&presence)).await?;
+    let _esp32_ingestion = start_esp32_ingestion_if_configured(
+        &config,
+        Arc::clone(&presence),
+        nn_pose_estimator.clone(),
+    )
+    .await?;
 
     let state = ServerState {
         mat_state: mat_state.clone(),
         pose_provider,
         demo_step: Arc::new(AtomicU64::new(0)),
         _presence: presence,
+        _nn_pose: nn_pose_estimator,
     };
 
     let pose_router = Router::new()
         .route("/healthz", get(healthz))
+        .route("/healthz/details", get(healthz_details))
         .route("/api/v1/pose/current", get(get_pose_current))
         .route("/ws/pose/stream", get(ws_pose_stream))
         .route("/api/v1/pose/demo/seed", post(seed_demo_data))
@@ -689,6 +813,7 @@ fn build_cors_layer(origins: &[String]) -> anyhow::Result<CorsLayer> {
 async fn start_esp32_ingestion_if_configured(
     config: &ServerConfig,
     presence: Arc<PresenceTracker>,
+    nn_pose: Option<Arc<NeuralPoseEstimator>>,
 ) -> anyhow::Result<Option<(HardwareAdapter, tokio::task::JoinHandle<()>)>> {
     let Some(port) = config.esp32_port.clone() else {
         return Ok(None);
@@ -723,6 +848,10 @@ async fn start_esp32_ingestion_if_configured(
                 .unwrap_or(&[]);
 
             presence.mark_seen(sequence_num, reading.metadata.rssi, amplitudes);
+
+            if let Some(estimator) = &nn_pose {
+                estimator.ingest_reading(&reading);
+            }
 
             if packet_count == 1 || packet_count % 100 == 0 {
                 let snapshot = presence.snapshot();
@@ -760,6 +889,38 @@ async fn start_esp32_ingestion_if_configured(
 
 async fn healthz() -> &'static str {
     "ok"
+}
+
+async fn healthz_details(State(state): State<ServerState>) -> Json<HealthzDetailsResponse> {
+    let (metrics, config) = if let Some(estimator) = &state._nn_pose {
+        (estimator.metrics(), Some(estimator.config_snapshot()))
+    } else {
+        (NnPoseMetrics::disabled(), None)
+    };
+
+    Json(HealthzDetailsResponse {
+        status: "ok",
+        nn: NnHealthDetails {
+            enabled: metrics.enabled,
+            model_loaded: metrics.model_loaded,
+            inference_count: metrics.inference_count,
+            inference_errors: metrics.inference_errors,
+            last_confidence: metrics.last_confidence,
+            config: config.map(healthz_nn_config),
+        },
+    })
+}
+
+fn healthz_nn_config(config: NnPoseConfigSnapshot) -> NnHealthConfig {
+    NnHealthConfig {
+        window_size: config.window_size,
+        subcarriers: config.subcarriers,
+        input_channels: config.input_channels,
+        inference_stride: config.inference_stride,
+        min_confidence: config.min_confidence,
+        translator_model_configured: config.translator_model_configured,
+        densepose_model_configured: config.densepose_model_configured,
+    }
 }
 
 async fn get_pose_current(State(state): State<ServerState>) -> Json<PoseFrame> {

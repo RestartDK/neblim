@@ -616,10 +616,6 @@ class PoseService {
       );
     });
 
-    if (normalizedPersons.length === 0) {
-      return null;
-    }
-
     return {
       timestamp: payload.timestamp,
       frameId: payload.frameId,
@@ -1162,6 +1158,10 @@ class PoseService {
       0.99,
     );
 
+    const presenceState = toStringValue(context.metadata.presence_state);
+    const sensorConnected =
+      presenceState === "active" || presenceState === "stale";
+
     const signalStrengthFromMetadata = toNumber(
       context.metadata.signal_strength,
     );
@@ -1184,21 +1184,31 @@ class PoseService {
       primary?.movementDelta ?? 0,
       motionScore * 0.08,
     );
-    const gaitLabel =
-      primary?.gaitPattern === "unsteady"
-        ? "Unsteady"
-        : primary?.gaitPattern === "stationary"
-          ? "Normal"
-          : primary
-            ? "Normal"
-            : "No signal";
 
-    const movementLabel =
-      motionScore >= motionHighThreshold
-        ? "High"
-        : motionScore >= motionActiveThreshold || inferredMovementDelta > 0.009
-          ? "Active"
-          : "Minimal";
+    let gaitLabel: string;
+    if (!sensorConnected && !primary) {
+      gaitLabel = "No signal";
+    } else if (!primary) {
+      gaitLabel = "No presence";
+    } else if (primary.gaitPattern === "unsteady") {
+      gaitLabel = "Unsteady";
+    } else {
+      gaitLabel = "Normal";
+    }
+
+    let movementLabel: string;
+    if (!sensorConnected && !primary) {
+      movementLabel = "Idle";
+    } else if (motionScore >= motionHighThreshold) {
+      movementLabel = "High";
+    } else if (
+      motionScore >= motionActiveThreshold ||
+      inferredMovementDelta > 0.009
+    ) {
+      movementLabel = "Active";
+    } else {
+      movementLabel = "Minimal";
+    }
 
     const postureLabel = this.resolvePostureLabel(primary);
 
