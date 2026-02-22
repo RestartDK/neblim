@@ -1,5 +1,19 @@
 # Turborepo starter
 
+## Local services
+
+Running `turbo run dev` from the repo root now starts all runtime services:
+
+- `apps/web` (Vite frontend)
+- `apps/server` (Bun API server)
+- `apps/ingest` (Rust `wifi-densepose-server`)
+
+Useful scoped commands:
+
+- `turbo run dev --filter=ingest`
+- `turbo run dev --filter=server`
+- `turbo run dev --filter=neblim-app`
+
 This Turborepo starter is maintained by the Turborepo core team.
 
 ## Using this example
