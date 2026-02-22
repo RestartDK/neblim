@@ -8,6 +8,7 @@ This app contains the Rust ingestion/server workspace copied from `wifi-densepos
 - `bun run build --filter=ingest` - compile check server crate
 - `bun run check-types --filter=ingest` - compile check Rust workspace
 - `bun run lint --filter=ingest` - run `cargo fmt --check`
+- `./scripts/calibrate-motion.sh` - collect still/movement samples and suggest motion thresholds
 
 ## Notes
 
@@ -17,3 +18,5 @@ This app contains the Rust ingestion/server workspace copied from `wifi-densepos
 - If no ESP32 is configured, you should only see startup logs and request logs.
 - CSI packet logs + synthetic presence require `WIFI_DENSEPOSE_ESP32_PORT`.
 - See `apps/ingest/.env.example` for optional runtime variables.
+- `WIFI_DENSEPOSE_PRESENCE_TTL_MS` defaults to `4000` for more stable live detection.
+- `WIFI_DENSEPOSE_MOTION_ACTIVE_THRESHOLD` and `WIFI_DENSEPOSE_MOTION_HIGH_THRESHOLD` tune movement sensitivity.
